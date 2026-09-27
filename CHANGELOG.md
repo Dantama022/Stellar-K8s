@@ -3,6 +3,58 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.7.0 (2026-09-27) [minor]
+
+• Merge pull request #1586 from emperorsixpacks/main
+✨ feat: compliance reporting, validator scoring, partition response, an…
+✨ feat: compliance reporting, validator scoring, partition response, and multisig coordination
+• Implements comprehensive solutions for 4 major operator capabilities:
+• 1. Compliance Reporting for Regulated Validators (#1581)
+• - Added ComplianceReport Custom Resource Definition (compliance.stellar.org/v1alpha1)
+•   supporting automated periodic audits on configurable daily/weekly/cron schedules.
+• - Implemented RegulatoryReportGenerator in src/compliance/regulatory_report.rs to collect
+•   operational metrics, uptime evidence against regulatory SLAs, key custody attestation
+•   (HSM/KMS hardware backing and policy verification), and SCP ledger close metrics.
+• - Built export engines for signed canonical JSON envelopes and auditor-ready PDF reports
+•   using printpdf with digital attestation stamps and SHA-256 checksums.
+• - Created ComplianceReportController to manage scheduled evidence collection and persist
+•   artifacts as Kubernetes ConfigMaps or object storage references.
+• - Closes #1581
+• 2. Validator Performance Scoring and Leaderboard (#1579)
+• - Added ValidatorScore and ValidatorLeaderboard CRDs (stellar.org/v1alpha1) for automated
+•   hourly validator performance grading and multi-cluster federation aggregation.
+• - Implemented ValidatorScoringEngine in src/controller/validator_scoring.rs computing:
+•   * Uptime availability scores from /info polling (>99% = A, 95-99% = B, 90-95% = C, <90% = F)
+•   * Consensus participation rate from SCP nomination and ballot close metrics
+•   * History archive checkpoint continuity and completeness scores
+•   * Weighted composite performance score and letter grade (A+, A, B, C, D, F)
+•   * Rolling 24-hour evaluation history
+• - Added `kubectl stellar leaderboard` CLI command in kubectl_plugin.rs displaying
+•   ranked validator performance tables.
+• - Exposed GET /api/v1/validators/leaderboard in operator REST API.
+• - Closes #1579
+• 3. Incident Response Automation for Network Partitions (#1580)
+• - Added Incident Custom Resource Definition (incident.stellar.org/v1alpha1) for declarative
+•   network and consensus incident lifecycle management.
+• - Implemented PartitionIncidentDetector in src/incident/partition_detector.rs:
+•   * Detects network partitions within 3 consecutive missed ledger closes (~15 seconds)
+•   * Auto-dispatches emergency alerts to Slack, Webhook, and PagerDuty within 30s SLA
+•   * Automatically populates Incident CR status with chronological diagnostic timelines
+•   * Analyzes quorum health and computes safety-verified quorum adjustment recommendations
+•     (adjusted validator sets and new Byzantine fault-tolerant thresholds).
+• - Closes #1580
+• 4. Multi-Signature Coordination for Administrative Operations (#1578)
+• - Added MultiSigOperation Custom Resource Definition (stellar.org/v1alpha1) coordinating
+•   M-of-N signature collection for administrative operations (settings upgrades, signer changes).
+• - Implemented MultiSigController in src/controller/multisig_controller.rs:
+•   * Gathers cryptographic signatures by querying signer sidecars or secret stores
+•   * Enforces timeout deadlines and marks operations expired if threshold is unreached
+•   * Exposes real-time partial signature progress (collected signatures, missing signers)
+•   * Maintains an append-only audit trail recording actors, public keys, and timestamps
+•   * Automatically submits assembled transactions to the Stellar network upon reaching quorum.
+• - Closes #1578
+
+
 ## Chart v2.6.0 (2026-09-26) [minor]
 
 • Merge pull request #1546 from kingksjo/feat/epics-1495-1498-platform-frameworks
