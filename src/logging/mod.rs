@@ -1,3 +1,15 @@
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //! Structured Logging and Analytics Module
 //!
 //! This module provides a consistent schema for structured logs, intelligent
@@ -5,8 +17,20 @@
 
 pub mod alerting;
 pub mod analytics;
+/// Standardised log field name constants (Issue #1115).
+///
+/// Import as `use stellar_k8s::logging::fields as F;` and reference
+/// `F::NODE`, `F::NAMESPACE`, etc. in every `tracing::*!` call so
+/// field names stay consistent across CI pipelines and runtime diagnostics.
+pub mod fields;
 pub mod sampling;
 pub mod storage;
+pub mod subscriber;
+
+pub use subscriber::{
+    init_binary_subscriber, init_subscriber, LogOutputFormat, SubscriberConfig, SubscriberGuard,
+    SubscriberInit,
+};
 
 use analytics::AnalyticsEngine;
 use chrono::Utc;
@@ -52,6 +76,9 @@ pub struct StructuredLog {
     /// Controller reconcile ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconcile_id: Option<String>,
+    /// Request correlation ID across service boundaries
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
     /// Arbitrary additional context
     #[serde(flatten)]
     pub extras: HashMap<String, serde_json::Value>,
@@ -129,13 +156,18 @@ pub fn build_structured_log(event: &Event<'_>) -> StructuredLog {
         module: metadata.module_path().map(|s| s.to_string()),
         file: metadata.file().map(|s| s.to_string()),
         line: metadata.line(),
-        trace_id: None, // Injected by OtelTraceIdLayer
-        span_id: None,
+        trace_id: crate::telemetry::current_trace_context().map(|(tid, _)| tid),
+        span_id: crate::telemetry::current_trace_context().map(|(_, sid)| sid),
         k8s_node: std::env::var("K8S_NODE_NAME").ok(),
         k8s_namespace: std::env::var("K8S_NAMESPACE").ok(),
         reconcile_id: visitor
             .extras
             .get("reconcile_id")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        correlation_id: visitor
+            .extras
+            .get("correlation_id")
+            .or_else(|| visitor.extras.get("x_correlation_id"))
             .and_then(|v| v.as_str().map(|s| s.to_string())),
         extras: visitor.extras,
     }
@@ -180,8 +212,94 @@ impl tracing::field::Visit for FullVisitor {
             .insert(field.name().to_string(), serde_json::json!(value));
     }
 
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.extras
+            .insert(field.name().to_string(), serde_json::json!(value));
+    }
+
     fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
         self.extras
             .insert(field.name().to_string(), serde_json::json!(value));
+    }
+
+    fn record_error(
+        &mut self,
+        field: &tracing::field::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.extras.insert(
+            field.name().to_string(),
+            serde_json::json!(value.to_string()),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_structured_log_serialization() {
+        let mut extras = HashMap::new();
+        extras.insert("component".to_string(), serde_json::json!("controller"));
+        extras.insert("duration_ms".to_string(), serde_json::json!(42));
+
+        let log = StructuredLog {
+            timestamp: "2026-07-26T10:00:00Z".to_string(),
+            level: "INFO".to_string(),
+            message: "Reconciliation successful".to_string(),
+            target: "stellar_k8s::controller".to_string(),
+            module: Some("stellar_k8s::controller".to_string()),
+            file: Some("src/controller/mod.rs".to_string()),
+            line: Some(100),
+            trace_id: Some("4bf92f3577b34da6a3ce929d0e0e4736".to_string()),
+            span_id: Some("00f067aa0ba902b7".to_string()),
+            k8s_node: Some("node-1".to_string()),
+            k8s_namespace: Some("default".to_string()),
+            reconcile_id: Some("rec-123".to_string()),
+            correlation_id: Some("corr-456".to_string()),
+            extras,
+        };
+
+        let json_str = serde_json::to_string(&log).expect("Failed to serialize StructuredLog");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse JSON");
+
+        assert_eq!(parsed["level"], "INFO");
+        assert_eq!(parsed["message"], "Reconciliation successful");
+        assert_eq!(parsed["target"], "stellar_k8s::controller");
+        assert_eq!(parsed["component"], "controller");
+        assert_eq!(parsed["duration_ms"], 42);
+        assert_eq!(parsed["reconcile_id"], "rec-123");
+    }
+
+    #[test]
+    fn test_structured_log_deserialization_roundtrip() {
+        let mut extras = HashMap::new();
+        extras.insert("custom_key".to_string(), serde_json::json!("custom_value"));
+
+        let log = StructuredLog {
+            timestamp: Utc::now().to_rfc3339(),
+            level: "WARN".to_string(),
+            message: "High memory usage detected".to_string(),
+            target: "stellar_k8s::monitoring".to_string(),
+            module: None,
+            file: None,
+            line: None,
+            trace_id: None,
+            span_id: None,
+            k8s_node: None,
+            k8s_namespace: None,
+            reconcile_id: None,
+            correlation_id: None,
+            extras,
+        };
+
+        let json = serde_json::to_string(&log).unwrap();
+        let log_back: StructuredLog = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(log_back.level, "WARN");
+        assert_eq!(log_back.message, "High memory usage detected");
+        assert_eq!(log_back.extras.get("custom_key").unwrap(), "custom_value");
     }
 }

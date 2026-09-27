@@ -81,20 +81,17 @@ Before opening a PR, confirm the following:
 
 ### Required checks
 
-Run these locally before submitting:
+Before submitting, run the contributor health gates via `make` (not raw
+`cargo` — Make targets set the workspace feature flags so results match CI):
 
 ```bash
-cargo fmt --all
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-make ci-local
+make health        # Format + lint + tests + docs
+make ci-local      # Full local CI gate (includes audit + link-check)
 ```
 
-If your change adds shell scripts or repository tooling, also run:
-
-```bash
-find scripts -type f -name "*.sh" -print0 | xargs -0 shellcheck -S error
-```
+The full checklist, command rationale, and per-step details live in the
+[Canonical Repository Health Checklist](docs/development/repo-health-checklist.md).
+If your change adds shell scripts, also run `make shellcheck`.
 
 ## 4. Commit Message Examples
 
@@ -159,7 +156,7 @@ The template ensures your change includes:
 
 ### Prerequisites
 
-- Rust stable (1.88+)
+- Rust 1.92+ (CI-enforced minimum — see `scripts/lib/versions.sh`)
 - Kubernetes local cluster (`kind`, `minikube`, etc.)
 - Docker
 - `cargo-audit`
@@ -167,36 +164,39 @@ The template ensures your change includes:
 
 ### Setup
 
-Use the project make targets and scripts:
+Docker, kind, kubectl, Helm, and `gh` must currently be installed manually
+for your OS (automated installers for these are tracked separately — see
+[DEVELOPMENT.md § Prerequisites](DEVELOPMENT.md#prerequisites) for the
+per-tool install links). Then run:
 
 ```bash
 make dev-setup
-bash scripts/setup-mac.sh  # macOS only
 ```
+
+`make dev-setup` installs the Rust toolchain/components, `cargo-audit` and
+`cargo-watch`, and the `pre-commit` hooks, then runs
+`stellar-bootstrap-verify` as a final step and prints a pass/fail report of
+every required tool and version pin — see
+[DEVELOPMENT.md § Troubleshooting](DEVELOPMENT.md#missing-or-outdated-tools)
+if it reports anything missing or outdated.
 
 ### Local checks — Canonical Workflow
 
-```bash
-make dev-setup     # One-time: install Rust toolchain, tools, and pre-commit hooks
-make quick         # Fast pre-commit check (fmt-check + cargo check)
-make ci-local      # Full CI pipeline (fmt-check + lint + audit + test + build + link-check)
-make health        # Full contributor health gate
-```
-
-Or run individual steps:
+Always drive the local pipeline through `make` targets so results match CI:
 
 ```bash
-cargo fmt --all
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
-make security-all  # Run audit + shellcheck
+make health        # Contributor health gate
+make ci-local      # Full CI pipeline locally
 ```
+
+See the [Canonical Repository Health Checklist](docs/development/repo-health-checklist.md)
+for the full command set and per-step expectations.
 
 ## 8. Coding Standards
 
-- Format Rust code with `cargo fmt`.
-- Use `cargo clippy --all-targets --all-features -- -D warnings` for linting.
-- Add or update tests for code changes.
+- Format Rust code with `make fmt`.
+- Lint with `make lint` (clippy with the project's feature flags).
+- Run tests with `make test`.
 - Document behavior changes in code comments and docs.
 - Keep PRs small and easy to review.
 
@@ -213,13 +213,16 @@ make security-all  # Run audit + shellcheck
 - Documentation files use `kebab-case.md` (e.g., `disk-scaling.md`).
 - Files that belong to a topic area go in the matching `docs/<topic>/` subdirectory.
 - Root-level docs (`README.md`, `DEVELOPMENT.md`, `CONTRIBUTING.md`) are entry points only — detailed content belongs in `docs/`.
-- New doc files must be linked from `docs/README.md` under the appropriate section.
+- New doc files must be added to `mkdocs.yml` under the appropriate section.
 
 ### Script conventions
 
-- Scripts use `kebab-case.sh` (e.g., `setup-mac.sh`).
+- Scripts use `kebab-case.sh` (e.g., `cleanup.sh`).
 - Every script must pass `shellcheck -S error`.
-- Historical or one-off scripts should be moved to `scripts/archive/` rather than left in the root of `scripts/`.
+- Do not add one-off archive or batch scripts under `scripts/`. Use
+  `scripts/cleanup.sh` (`make cleanup`) as the single cleanup entrypoint, or
+  remove obsolete helpers entirely.
+- Historical or one-off scripts should not be committed to the repository; keep only operational scripts under `scripts/`.
 
 ### Manifest and config conventions
 
@@ -229,15 +232,21 @@ make security-all  # Run audit + shellcheck
 
 ## 9. Repo Health Checklist
 
+Before marking a PR ready for review, run `make health` (or `make ci-local`
+for the full audit + link-check gate) and complete every item in the
+[Canonical Repository Health Checklist](docs/development/repo-health-checklist.md).
+That document is the single source of truth — do not duplicate command blocks here.
 Run through this before marking a PR ready for review:
 
-- [ ] `make ci-local` passes (format + lint + audit + test + build)
+- [ ] `make health` passes (format + lint + test + docs) — or `make ci-local` for the full audit + link-check gate
+- [ ] `make health-fast` passes for a quick pre-push compile check
 - [ ] No new `#[allow(dead_code)]` without an explanatory comment
 - [ ] No unused imports in modified files
 - [ ] Generated manifests are up to date with their source
 - [ ] Shell scripts pass `shellcheck -S error`
-- [ ] New doc files are linked from `docs/README.md`
+- [ ] New doc files are added to `mkdocs.yml`
 - [ ] Commit messages follow Conventional Commits and include a `Signed-off-by` line
+Before requesting a review for a Pull Request, please ensure all checks listed in the [Canonical Repository Health Checklist](docs/development/repo-health-checklist.md) have been run and verified.
 
 ## 10. Need Help?
 
@@ -277,6 +286,6 @@ Refer to [README.md](README.md) and [DEVELOPMENT.md](DEVELOPMENT.md) for additio
 
 ### CI Failures
 - **Problem**: GitHub Actions workflow fails on linting.
-  - **Solution**: Run `cargo fmt` and `cargo clippy` locally before pushing. Also, check `.pre-commit-config.yaml` to ensure your pre-commit hooks are installed.
+  - **Solution**: Run `make fmt` and `make lint` locally before pushing. Also, check `.pre-commit-config.yaml` to ensure your pre-commit hooks are installed.
 - **Problem**: Link validation CI fails.
-  - **Solution**: Make sure all Markdown links are valid and relative paths point to existing files.
+  - **Solution**: Run `make link-check` for markdown link/anchor issues, or `make link-check-all` for the full repo-wide check (markdown + source + configs).

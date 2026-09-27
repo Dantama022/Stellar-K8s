@@ -1,3 +1,15 @@
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //! Prometheus metrics for the Stellar-K8s operator
 //!
 //! # Exported metrics
@@ -13,6 +25,8 @@
 //! - `stellar_horizon_tps` (gauge): Horizon TPS labeled by namespace/name/node_type/network/hardware_generation.
 //! - `stellar_horizon_queue_length` (gauge): pending Horizon request queue length labeled by namespace/name/node_type/network/hardware_generation.
 //! - `stellar_node_active_connections` (gauge): active peer connections labeled by namespace/name/node_type/network/hardware_generation.
+//! - `stellar_horizon_request_error_ratio` (gauge): ratio (0.0-1.0) of Horizon API requests returning 4xx/5xx, labeled by namespace/name/node_type/network/hardware_generation.
+//! - `stellar_horizon_db_query_duration_seconds` (gauge): average Horizon database query duration in seconds, labeled by namespace/name/node_type/network/hardware_generation.
 
 use std::sync::atomic::{AtomicI64, AtomicU64};
 
@@ -70,6 +84,14 @@ pub static HORIZON_QUEUE_LENGTH: Lazy<Family<NodeLabels, Gauge<i64, AtomicI64>>>
 
 /// Gauge tracking active connections per node
 pub static ACTIVE_CONNECTIONS: Lazy<Family<NodeLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Gauge tracking the ratio (0.0-1.0) of Horizon API requests that returned a 4xx/5xx status
+pub static HORIZON_REQUEST_ERROR_RATIO: Lazy<Family<NodeLabels, Gauge<f64, AtomicU64>>> =
+    Lazy::new(Family::default);
+
+/// Gauge tracking average Horizon database query duration in seconds
+pub static HORIZON_DB_QUERY_DURATION_SECONDS: Lazy<Family<NodeLabels, Gauge<f64, AtomicU64>>> =
     Lazy::new(Family::default);
 
 /// Gauge tracking archive integrity status (1 = healthy, 0 = corrupted)
@@ -194,6 +216,42 @@ pub struct HorizonMigrationLabels {
     pub network: String,
     pub status: String, // "success" or "failed"
 }
+
+/// Labels identifying one watched Stellar asset.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct AssetLabels {
+    pub namespace: String,
+    pub monitor: String,
+    pub network: String,
+    pub asset_code: String,
+    pub issuer: String,
+    pub contract_id: String,
+}
+
+/// Current asset supply in stroops (1 asset unit = 10^7 stroops).
+pub static ASSET_SUPPLY_STROOPS: Lazy<Family<AssetLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Current number of accounts holding the watched asset.
+pub static ASSET_HOLDERS: Lazy<Family<AssetLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Current asset liquidity in stroops.
+pub static ASSET_LIQUIDITY_STROOPS: Lazy<Family<AssetLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Signed supply change percentage observed in the most recently processed ledger.
+pub static ASSET_SUPPLY_CHANGE_PERCENT: Lazy<Family<AssetLabels, Gauge<f64, AtomicU64>>> =
+    Lazy::new(Family::default);
+
+/// Number of large supply changes observed for a watched asset.
+pub static ASSET_LARGE_SUPPLY_CHANGES_TOTAL: Lazy<
+    Family<AssetLabels, Counter<u64, AtomicU64>>,
+> = Lazy::new(Family::default);
+
+/// Number of clawback ledger changes observed for the watched asset.
+pub static ASSET_CLAWBACK_EVENTS_TOTAL: Lazy<Family<AssetLabels, Counter<u64, AtomicU64>>> =
+    Lazy::new(Family::default);
 
 /// Histogram tracking reconcile duration (seconds)
 pub static RECONCILE_DURATION_SECONDS: Lazy<Family<ReconcileLabels, Histogram>> = Lazy::new(|| {
@@ -340,6 +398,41 @@ pub static TRAFFIC_SYSTEM_LOAD_PERCENT: Lazy<Family<TrafficNodeLabels, Gauge<i64
 pub static TRAFFIC_CIRCUIT_BREAKER_STATE: Lazy<Family<TrafficNodeLabels, Gauge<i64, AtomicI64>>> =
     Lazy::new(Family::default);
 
+/// Labels for control-plane degradation metrics (#1494).
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct ControlPlaneComponentLabels {
+    pub component: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct DegradationTransitionLabels {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct SuppressedActionLabels {
+    pub action: String,
+}
+
+/// Current degradation level (0=Normal, 1=Reduced, 2=Degraded, 3=Frozen).
+pub static CONTROL_PLANE_DEGRADATION_LEVEL: Lazy<Gauge<i64, AtomicI64>> = Lazy::new(Gauge::default);
+
+/// Per-component state (1=healthy, 0=unhealthy, -1=unknown).
+pub static CONTROL_PLANE_COMPONENT_STATE: Lazy<
+    Family<ControlPlaneComponentLabels, Gauge<i64, AtomicI64>>,
+> = Lazy::new(Family::default);
+
+/// Degradation level transitions.
+pub static CONTROL_PLANE_DEGRADATION_TRANSITIONS: Lazy<
+    Family<DegradationTransitionLabels, Counter<u64, AtomicU64>>,
+> = Lazy::new(Family::default);
+
+/// Operator actions withheld by the degradation gate.
+pub static CONTROL_PLANE_SUPPRESSED_ACTIONS: Lazy<
+    Family<SuppressedActionLabels, Counter<u64, AtomicU64>>,
+> = Lazy::new(Family::default);
+
 /// Global metrics registry
 pub static REGISTRY: Lazy<Registry> = Lazy::new(|| {
     let mut registry = Registry::default();
@@ -392,6 +485,16 @@ pub static REGISTRY: Lazy<Registry> = Lazy::new(|| {
         "stellar_node_active_connections",
         "Number of active peer connections",
         ACTIVE_CONNECTIONS.clone(),
+    );
+    registry.register(
+        "stellar_horizon_request_error_ratio",
+        "Ratio (0.0-1.0) of Horizon API requests that returned a 4xx/5xx status",
+        HORIZON_REQUEST_ERROR_RATIO.clone(),
+    );
+    registry.register(
+        "stellar_horizon_db_query_duration_seconds",
+        "Average Horizon database query duration in seconds",
+        HORIZON_DB_QUERY_DURATION_SECONDS.clone(),
     );
     registry.register(
         "stellar_archive_ledger_lag",
@@ -565,6 +668,37 @@ pub static REGISTRY: Lazy<Registry> = Lazy::new(|| {
     );
 
     registry.register(
+        "stellar_asset_supply_stroops",
+        "Current watched asset supply in stroops",
+        ASSET_SUPPLY_STROOPS.clone(),
+    );
+    registry.register(
+        "stellar_asset_holders",
+        "Current number of accounts holding a watched asset",
+        ASSET_HOLDERS.clone(),
+    );
+    registry.register(
+        "stellar_asset_liquidity_stroops",
+        "Current watched asset liquidity in stroops",
+        ASSET_LIQUIDITY_STROOPS.clone(),
+    );
+    registry.register(
+        "stellar_asset_supply_change_percent",
+        "Signed supply change percentage observed in the latest ledger",
+        ASSET_SUPPLY_CHANGE_PERCENT.clone(),
+    );
+    registry.register(
+        "stellar_asset_large_supply_changes_total",
+        "Number of supply changes above the monitor's configured threshold",
+        ASSET_LARGE_SUPPLY_CHANGES_TOTAL.clone(),
+    );
+    registry.register(
+        "stellar_asset_clawback_events_total",
+        "Total observed clawback ledger changes for watched assets",
+        ASSET_CLAWBACK_EVENTS_TOTAL.clone(),
+    );
+
+    registry.register(
         "stellar_traffic_requests_total",
         "Total traffic shaping decisions by priority and decision",
         TRAFFIC_REQUESTS_TOTAL.clone(),
@@ -683,6 +817,27 @@ pub static REGISTRY: Lazy<Registry> = Lazy::new(|| {
         "stellar_observability_baseline_samples",
         "Number of samples in the baseline for each metric",
         OBSERVABILITY_BASELINE_SAMPLES.clone(),
+    );
+
+    registry.register(
+        "stellar_control_plane_degradation_level",
+        "Control-plane degradation level (0=Normal, 1=Reduced, 2=Degraded, 3=Frozen)",
+        CONTROL_PLANE_DEGRADATION_LEVEL.clone(),
+    );
+    registry.register(
+        "stellar_control_plane_component_state",
+        "Control-plane component state (1=healthy, 0=unhealthy, -1=unknown)",
+        CONTROL_PLANE_COMPONENT_STATE.clone(),
+    );
+    registry.register(
+        "stellar_control_plane_degradation_transitions",
+        "Control-plane degradation level transitions",
+        CONTROL_PLANE_DEGRADATION_TRANSITIONS.clone(),
+    );
+    registry.register(
+        "stellar_control_plane_suppressed_actions",
+        "Operator actions withheld because of control-plane degradation",
+        CONTROL_PLANE_SUPPRESSED_ACTIONS.clone(),
     );
 
     registry
@@ -1078,6 +1233,48 @@ pub fn set_active_connections(
         hardware_generation: hardware_generation.to_string(),
     };
     ACTIVE_CONNECTIONS.get_or_create(&labels).set(connections);
+}
+
+/// Update the Horizon API request error ratio (0.0-1.0) for a node
+pub fn set_horizon_request_error_ratio(
+    namespace: &str,
+    name: &str,
+    node_type: &str,
+    network: &str,
+    hardware_generation: &str,
+    error_ratio: f64,
+) {
+    let labels = NodeLabels {
+        namespace: namespace.to_string(),
+        name: name.to_string(),
+        node_type: node_type.to_string(),
+        network: network.to_string(),
+        hardware_generation: hardware_generation.to_string(),
+    };
+    HORIZON_REQUEST_ERROR_RATIO
+        .get_or_create(&labels)
+        .set(error_ratio);
+}
+
+/// Update the average Horizon database query duration (seconds) for a node
+pub fn set_horizon_db_query_duration_seconds(
+    namespace: &str,
+    name: &str,
+    node_type: &str,
+    network: &str,
+    hardware_generation: &str,
+    duration_seconds: f64,
+) {
+    let labels = NodeLabels {
+        namespace: namespace.to_string(),
+        name: name.to_string(),
+        node_type: node_type.to_string(),
+        network: network.to_string(),
+        hardware_generation: hardware_generation.to_string(),
+    };
+    HORIZON_DB_QUERY_DURATION_SECONDS
+        .get_or_create(&labels)
+        .set(duration_seconds);
 }
 
 fn generate_laplace_noise(epsilon: f64, sensitivity: f64) -> f64 {
@@ -1912,4 +2109,40 @@ mod tests {
         inc_operator_reconcile_error("stellarnode", "unknown");
         // Function should not panic with various error kinds
     }
+}
+
+/// Record the current control-plane degradation level.
+pub fn set_control_plane_degradation_level(level: i64) {
+    CONTROL_PLANE_DEGRADATION_LEVEL.set(level);
+}
+
+/// Record a control-plane component's state (1=healthy, 0=unhealthy, -1=unknown).
+pub fn set_control_plane_component_state(component: &str, state: i64) {
+    let labels = ControlPlaneComponentLabels {
+        component: component.to_string(),
+    };
+    CONTROL_PLANE_COMPONENT_STATE
+        .get_or_create(&labels)
+        .set(state);
+}
+
+/// Count a degradation level transition.
+pub fn inc_control_plane_degradation_transition(from: &str, to: &str) {
+    let labels = DegradationTransitionLabels {
+        from: from.to_string(),
+        to: to.to_string(),
+    };
+    CONTROL_PLANE_DEGRADATION_TRANSITIONS
+        .get_or_create(&labels)
+        .inc();
+}
+
+/// Count an operator action withheld by the degradation gate.
+pub fn inc_control_plane_suppressed_action(action: &str) {
+    let labels = SuppressedActionLabels {
+        action: action.to_string(),
+    };
+    CONTROL_PLANE_SUPPRESSED_ACTIONS
+        .get_or_create(&labels)
+        .inc();
 }
