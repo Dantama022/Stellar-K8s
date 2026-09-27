@@ -3,6 +3,239 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.7.0 (2026-09-27) [minor]
+
+• Merge pull request #1586 from emperorsixpacks/main
+✨ feat: compliance reporting, validator scoring, partition response, an…
+✨ feat: compliance reporting, validator scoring, partition response, and multisig coordination
+• Implements comprehensive solutions for 4 major operator capabilities:
+• 1. Compliance Reporting for Regulated Validators (#1581)
+• - Added ComplianceReport Custom Resource Definition (compliance.stellar.org/v1alpha1)
+•   supporting automated periodic audits on configurable daily/weekly/cron schedules.
+• - Implemented RegulatoryReportGenerator in src/compliance/regulatory_report.rs to collect
+•   operational metrics, uptime evidence against regulatory SLAs, key custody attestation
+•   (HSM/KMS hardware backing and policy verification), and SCP ledger close metrics.
+• - Built export engines for signed canonical JSON envelopes and auditor-ready PDF reports
+•   using printpdf with digital attestation stamps and SHA-256 checksums.
+• - Created ComplianceReportController to manage scheduled evidence collection and persist
+•   artifacts as Kubernetes ConfigMaps or object storage references.
+• - Closes #1581
+• 2. Validator Performance Scoring and Leaderboard (#1579)
+• - Added ValidatorScore and ValidatorLeaderboard CRDs (stellar.org/v1alpha1) for automated
+•   hourly validator performance grading and multi-cluster federation aggregation.
+• - Implemented ValidatorScoringEngine in src/controller/validator_scoring.rs computing:
+•   * Uptime availability scores from /info polling (>99% = A, 95-99% = B, 90-95% = C, <90% = F)
+•   * Consensus participation rate from SCP nomination and ballot close metrics
+•   * History archive checkpoint continuity and completeness scores
+•   * Weighted composite performance score and letter grade (A+, A, B, C, D, F)
+•   * Rolling 24-hour evaluation history
+• - Added `kubectl stellar leaderboard` CLI command in kubectl_plugin.rs displaying
+•   ranked validator performance tables.
+• - Exposed GET /api/v1/validators/leaderboard in operator REST API.
+• - Closes #1579
+• 3. Incident Response Automation for Network Partitions (#1580)
+• - Added Incident Custom Resource Definition (incident.stellar.org/v1alpha1) for declarative
+•   network and consensus incident lifecycle management.
+• - Implemented PartitionIncidentDetector in src/incident/partition_detector.rs:
+•   * Detects network partitions within 3 consecutive missed ledger closes (~15 seconds)
+•   * Auto-dispatches emergency alerts to Slack, Webhook, and PagerDuty within 30s SLA
+•   * Automatically populates Incident CR status with chronological diagnostic timelines
+•   * Analyzes quorum health and computes safety-verified quorum adjustment recommendations
+•     (adjusted validator sets and new Byzantine fault-tolerant thresholds).
+• - Closes #1580
+• 4. Multi-Signature Coordination for Administrative Operations (#1578)
+• - Added MultiSigOperation Custom Resource Definition (stellar.org/v1alpha1) coordinating
+•   M-of-N signature collection for administrative operations (settings upgrades, signer changes).
+• - Implemented MultiSigController in src/controller/multisig_controller.rs:
+•   * Gathers cryptographic signatures by querying signer sidecars or secret stores
+•   * Enforces timeout deadlines and marks operations expired if threshold is unreached
+•   * Exposes real-time partial signature progress (collected signatures, missing signers)
+•   * Maintains an append-only audit trail recording actors, public keys, and timestamps
+•   * Automatically submits assembled transactions to the Stellar network upon reaching quorum.
+• - Closes #1578
+
+
+## Chart v2.6.0 (2026-09-26) [minor]
+
+• Merge pull request #1546 from kingksjo/feat/epics-1495-1498-platform-frameworks
+• Platform frameworks: hot-reload, secrets broker, rollback engine, data residency
+• Merge pull request #1547 from De-hunterJS/feat/k8s-compat-dataplane-snapshot-cert-automation-api-deprecation
+✨ feat: implement k8s-compat-matrix, dataplane-snapshots, cert-automati…
+✨ feat: implement k8s-compat-matrix, dataplane-snapshots, cert-automation, deprecated-api-detection
+• Adds four major automation features:
+• 1. Kubernetes Compatibility Matrix
+•    - Tests operator against 6 K8s versions (1.27-1.32, covering N and N-1)
+•    - Detects upstream pre-releases within 24h
+•    - Publishes matrix results as badge + JSON artifact
+•    - Completes full matrix in <60 minutes
+• 2. Dataplane Configuration Snapshots
+•    - New StellarConfigSnapshot CRD for versioned configs
+•    - Content-addressed by Merkle root (SHA-256)
+•    - Delta snapshots reduce bandwidth by >=80% for large configs
+•    - Agents perform atomic verify + swap (no partial state)
+• 3. Certificate Automation
+•    - Short-lived certs (<=24h) issued automatically
+•    - Hot-reload without process restart (inotify + atomic writes)
+•    - Revocation detection propagates in <60s cluster-wide
+•    - Certificate inventory visible as queryable CRs
+• 4. Deprecated API Usage Detection
+•    - End-to-end detection via audit logs + metrics
+•    - Attribution to owning team via namespace labels
+•    - Weekly migration reports (CSV, HTML, JSON)
+•    - Phase-based enforcement: warn -> deny without webhook restart
+• Acceptance Criteria Met:
+• ✓ K8s matrix covers N and N-1 minors (1.31, 1.32)
+• ✓ Snapshot generation <2s for 10k objects
+• ✓ Delta compression >= 80% bandwidth reduction
+• ✓ Cert rotation without request drops
+• ✓ API deprecation detection >= 99% accuracy
+• Files Added:
+• - tests/compat_matrix.rs (extended with 6 versions)
+• - .github/workflows/k8s-compat-matrix-advanced.yml
+• - config/crd/stellar_config_snapshot_crd.yaml
+• - src/crd/config_snapshot.rs
+• - src/controller/cert_automation.rs
+• - src/controller/api_deprecation_detector.rs
+• - docs/AUTOMATION_FEATURES.md
+• - scripts/ci/generate-badge.sh
+✨ feat: shared platform frameworks for #1498 hot-reload, #1497 secrets broker, #1496 rollback engine, #1495 data residency
+
+
+## Chart v2.5.0 (2026-09-26) [minor]
+
+• Merge pull request #1538 from broda-spendy/epic-1509-dynamic-rate-limiting
+✨ feat(fair-share): add dynamic rate limiting with per-consumer fair share (#1509)
+• Merge pull request #1537 from broda-spendy/epic-1510-node-boot-verification
+✨ feat(node-boot): add immutable infrastructure verification at node boot (#1510)
+✨ feat(fair-share): add dynamic rate limiting with per-consumer fair share (#1509)
+• - New air_share_rate_limiter module with token-bucket per consumer
+• - FairShareRateLimiter allocates capacity dynamically based on active consumers
+• - Configurable min/max share, burst multiplier, adaptive refill
+• - Jain's fairness index computation for monitoring
+• - Integration with existing RetryPolicyTuner for adaptive behavior
+• - Consumer identity (tenant, workload, API key hash)
+• - Prometheus metrics export scaffold
+• Partially addresses #1509 acceptance criteria:
+• - [ ] Noisy-consumer containment within 5s of saturation onset
+• - [ ] Well-behaved consumers see zero induced 429s
+• - [ ] Fair-share Jain index >= 0.9 under contention
+• - [ ] Limit config propagates in under 1s
+✨ feat(node-boot): add immutable infrastructure verification at node boot (#1510)
+• - New
+• ode_boot_verification module for pre-kubelet image integrity checks
+• - erify_node_boot() validates image digest, kernel, OS, SBOM (allowlist/denylist)
+• - Generates Kubernetes NodeCondition (BootVerified) for API visibility
+• - Systemd unit generator for Before=kubelet.service integration
+• - Cross-platform package detection (rpm/dpkg/apk)
+• - Extends existing ootstrap_verify for toolchain checks
+• - Target: <15s added boot time
+• Partially addresses #1510 acceptance criteria:
+• - [ ] Tampered node image prevented from joining
+• - [ ] Verification adds under 15s to node boot
+• - [ ] Node condition explains any refusal
+• - [ ] Expected-image changes rolled out via the same pipeline
+
+
+## Chart v2.4.0 (2026-09-26) [minor]
+
+• Merge pull request #1545 from m1s0g1/issue1474
+✨ feat: schema evolution framework
+✨ feat: schema evolution framework
+• Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+✨ feat: federation consistency protocol
+• Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+✨ feat: progressive delivery controller
+• Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+🐛 refactor: structured error handling
+• Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+
+
+## Chart v2.3.0 (2026-09-26) [minor]
+
+• Merge pull request #1535 from broda-spendy/epic-1512-index-sharding
+✨ feat(controller): add declarative index sharding for CRD informer caches (#1512)
+✨ feat(index-sharding): add declarative index sharding for CRD informer caches (#1512)
+• - New index_sharding module with consistent-hash based ShardRing
+• - ShardedIndex for partitioned informer cache with memory tracking
+• - Configurable shard count, shard key, and virtual nodes
+• - Rebalance operation moves O(1/N) keys on shard count change
+• - Unit tests for distribution, insertion, and rebalance
+• Partially addresses #1512 acceptance criteria:
+• - [ ] Cache memory under budget at 500k objects
+• - [ ] Rebalance causes no watch disconnects
+• - [ ] Lookup latency flat at 10x scale
+• - [ ] Shard strategy visible in CRD status
+
+
+## Chart v2.2.0 (2026-09-25) [minor]
+
+• Merge pull request #1536 from broda-spendy/epic-1511-cross-signal-anomaly
+✨ feat(controller): add cross-signal anomaly detection for deployments (#1511)
+✨ feat(cross-signal): add cross-signal anomaly detection for deployments (#1511)
+• - New cross_signal_anomaly module correlating deployment events with traffic metrics
+• - CrossSignalDetector joins deploy events to traffic metrics on time axis
+• - Change-point detection via Welch's t-test + EWMA adaptive baseline
+• - Configurable pre/post deploy windows, significance thresholds
+• - Outputs confidence score (0-1) calibrated per signal
+• - Unit tests for error-rate spike detection and stats computation
+• Partially addresses #1511 acceptance criteria:
+• - [ ] Detect seeded bad deploys with >= 90% recall
+• - [ ] False-positive flag rate below 5%
+• - [ ] Flag emitted within 10 minutes of deploy
+• - [ ] Confidence score calibrated against outcomes
+
+
+## Chart v2.1.1 (2026-09-25) [patch]
+
+• Merge pull request #1539 from orunganiekan/fix/1513-1514-1515-1516-approvals-cardinality-latency-remediation
+• [#1513, #1514, #1515, #1516] Implement multi-party approval, cardinality governance, latency tracking, and security baseline remediation
+• [#1513, #1514, #1515, #1516] Implement multi-party approval, cardinality governance, latency tracking, and security baseline remediation
+
+
+## Chart v2.1.0 (2026-09-25) [minor]
+
+• Merge pull request #1541 from trinnode/main
+✨ feat: structured feature-flags, migration gates, compliance evidence, connection draining
+📝 chore(helm): bump chart to v2.0.0 [skip ci]
+• Merge pull request #1 from trinnode/feat/epics-1505-1506-1507-1508
+✨ feat: structured feature-flags, migration gates, compliance evidence, connection draining
+✨ feat: implement epics #1505, #1506, #1507, #1508
+• Closes #1505: structured feature-flag evaluation with signed bundles
+• and targeting audit trail. Adds src/flag_bundle.rs providing:
+• - FlagBundle / SignedBundle with HMAC-SHA256 verification
+• - BundleStore with cached evaluation (off network hot path)
+• - KillSwitch evaluated before the bundle pipeline (works when
+•   delivery is down)
+• - EvaluationAudit with bounded append-only trail recording every
+•   user-affecting decision (flag, variant, subject)
+• Closes #1507: automated database migration safety gates in the
+• deploy pipeline. Adds src/migration_safety.rs providing:
+• - Gate::LockRisk, Gate::BackwardCompatibility, Gate::Rollback
+• - Pure-string analysis (no DB connection), gate runtime under 60s
+• - JUnit XML report via GateReport::to_junit_xml for existing PR checks
+• Closes #1506: compliance evidence collector for continuous control
+• verification. Adds src/compliance/evidence_schedule.rs providing:
+• - Declarative ControlProbe (config, not code)
+• - ScheduledCollector running due probes on a schedule
+• - Coverage completeness tracked with first-class CoverageFinding
+•   gaps
+• - Signed EvidencePackage validated offline via HMAC-SHA256
+• Closes #1508: graceful connection draining framework for rolling
+• updates. Adds src/connection_drain.rs providing:
+• - DrainController enforcing stop-intake → drain → exit order
+• - ConnectionGuard / StreamGuard RAII tracking in-flight work
+• - Bounded interruption for long-lived streams with graceful close
+• - DrainMetrics exposing per-deployment drain duration
+• - prestop_hook_yaml rendering the matching preStop template
+• Also fixes clippy 1.92 regressions in blue_green_core.rs,
+• tenant_reconciler.rs, and profiling.rs to restore CI parity.
+
+
+## Chart v2.0.0 (2026-09-25) [major]
+
+
+
+
 ## Chart v1.5.0 (2026-09-24) [minor]
 
 • Merge pull request #1534 from francisdouglas-ux/feat/epics-1521-1522-1523-1524
