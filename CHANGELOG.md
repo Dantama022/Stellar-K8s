@@ -3,6 +3,163 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.8.0 (2026-09-27) [minor]
+
+• Merge pull request #1592 from Otaiki1/prmaster/1567-1568-1566-1569-4-issues-1567-1568-1566-1569-85543a
+• 4 issues: #1567, #1568, #1566, #1569
+• Merge pull request #1591 from ReinaMaze/feature/observability-infrastructure-epics
+✨ feat: add observability and infrastructure platform epic specs
+• Merge pull request #1590 from iheomadev/webhook-ledger-close-delivery
+✨ feat(webhook): implement LedgerCloseWebhook CRD and dispatcher (#1577)
+• Merge branch 'main' into webhook-ledger-close-delivery
+• Merge pull request #1589 from mathstickz/feat/Remediation
+• feat :Policy Drift Remediation Loop for Security Baseline Violations
+• Merge pull request #1588 from meetdarc-tech/feature/1574-ledger-migration-1575-asset-monitoring
+✨ feat: add ledger migration and SAC monitoring
+• Merge pull request #1587 from CollinsC1O/modes
+✨ feat: implement Graceful Degradation Modes for Partial Control-Plane Outage
+• Merge branch 'main' into modes
+• Merge pull request #1585 from CollinsC1O/Forecasting
+✨ feat: implement Capacity Forecasting Engine with Quarterly Scaling Re…
+• Merge pull request #1584 from itsnotOJ/fix/1502-epic-real-time-schema-registry-for-all-internal-service-apis
+• [#1502] [EPIC] Real-Time Schema Registry for All Internal Service APIs
+• Merge branch 'main' into fix/1502-epic-real-time-schema-registry-for-all-internal-service-apis
+• Merge pull request #1550 from itsnotOJ/fix/1501-epic-declarative-webhook-certificate-management-with-zero-trust-renewal
+• [#1501] [EPIC] Declarative Webhook Certificate Management with Zero-Trust Renewal
+• Merge pull request #1549 from olalois/feat/interservice-mtls-ci-benchmarks
+• Add inter-service mTLS and harden validation benchmarks
+• Work on #1567: [EPIC] SDF Testnet Compliance Validation
+• Closes #1567
+✨ feat: add observability and infrastructure platform epic specs
+• - Epic 1: Alert Correlation & Incident Management
+•   - Deduplicate and correlate alerts from multiple sources
+•   - Root cause analysis with symptom suppression
+•   - Unified incident timelines with auto-lifecycle management
+•   - Target: 60% alert reduction, 40% faster time-to-incident
+• - Epic 2: Distributed Tracing for Async Message Queues
+•   - W3C trace context propagation through Kafka, NATS, webhooks
+•   - Zero-config SDK shims preserving existing APIs
+•   - Broken chain detection and metrics
+•   - Target: 95% trace stitch rate, <200 byte overhead
+• - Epic 3: Declarative Backup Plans with PITR
+•   - BackupPlan CRs with RPO-based scheduling
+•   - Point-in-time recovery for PostgreSQL, MySQL, MongoDB
+•   - Mandatory restore verification before completion
+•   - Cross-region replication with checksum validation
+•   - Target: 100% verification pass rate, RPO achievement for 30 days
+• - Epic 4: GitOps Drift Detection & Auto-Revert
+•   - Three-way diff (base/live/git) with server-side-default filtering
+•   - Classify drift: manual mutations vs. pending propagation
+•   - Auto-revert with rollback safety checks
+•   - Actor attribution from audit logs
+•   - Target: 60s detection, zero false positives, 95% attribution
+• All specs include detailed requirements, technical design, CRDs,
+• metrics, and acceptance criteria.
+✨ feat(webhook): implement LedgerCloseWebhook CRD and dispatcher (#1577)
+• Add at-least-once webhook delivery for Stellar ledger-close events.
+• Changes:
+• - src/crd/ledger_close_webhook.rs: LedgerCloseWebhook CRD with typed spec,
+•   status subresource, delivery log ring-buffer (20 entries), and
+•   LedgerClosePayload struct for the JSON body.
+• - src/controller/ledger_close_dispatcher.rs: Dispatcher with per-subscription
+•   ordered delivery workers, exponential back-off retry (1s→2s→4s→8s→16s,
+•   max 5 retries), HMAC-SHA256 payload signing (X-Stellar-Signature header),
+•   and Kubernetes status patching after each delivery attempt.
+• - config/crd/ledgerclosehook-crd.yaml: OpenAPI v3 schema for the CRD.
+• - config/samples/ledger-close-webhook-example.yaml: Ready-to-use sample.
+• - src/crd/mod.rs, src/controller/mod.rs: Register new modules and re-exports.
+• Acceptance criteria met:
+• - Webhook delivered within 5 s of ledger close (poll loop + immediate dispatch)
+• - Retry with exponential backoff on failure (max 5 attempts)
+• - Delivery order preserved per subscription (per-hook channel worker)
+• - HMAC signature verifiable by consumer (X-Stellar-Signature: sha256=<hex>)
+• Closes #1577
+• feat :Policy Drift Remediation Loop for Security Baseline Violations
+✨ feat: add ledger migration and asset monitoring
+✨ feat: implement Graceful Degradation Modes for Partial Control-Plane Outage
+✨ feat: implement Capacity Forecasting Engine with Quarterly Scaling Recommendations
+✨ feat(schema): consumer-aware versioned schema registry with a PR compatibility gate
+• - central registry snapshot covering every internal API subject, committed as
+•   schemas/registry.json and enforced at build time by build.rs
+• - deeper compatibility engine: nested objects, type changes, enum removals and
+•   a dependency-free protobuf declaration check, across backward/forward/full
+• - atomic registration that checks the subject policy, every pinned consumer and
+•   an audited one-shot override before mutating state
+• - explicit registry override required for any breaking change
+• - generated clients are pinned to exact schema versions; floating refs rejected
+• - consumer impact report attached to every registered version
+• - new schema-compat CLI subcommand gates a proposed schema against all
+•   consumers and emits the impact report
+• - new InternalApiSchema CRD repeats the pin and enforcement policy at deploy
+•   time, plus sample manifest, CRD YAML and design doc
+✨ feat(webhook): declarative cert-manager TLS lifecycle with fail-closed cert health
+• - render a bootstrap Issuer, a CA Certificate, a CA-backed Issuer and a
+•   continuously renewed serving Certificate for the admission webhook
+• - distribute the CA to every apiserver via cert-manager cainjector and
+•   pin failurePolicy: Fail so TLS/trust errors never bypass admission
+• - serve TLS with rustls through axum-server, reloading the mounted Secret
+•   on rotation after draining in-flight connections
+• - validate the serving identity before binding and fail closed otherwise
+• - add a stellar-cert-health sidecar that pre-validates chain, validity, SAN
+•   and EKU offline, gates readiness, and exports expiry-horizon metrics
+• - alert at 25% and 10% of certificate lifetime remaining
+• - reject --cert-path without --key-path at startup
+✨ feat(security): add mesh mTLS and benchmark gates
+• Signed-off-by: olalois <142523986+olalois@users.noreply.github.com>
+
+
+## Chart v2.7.0 (2026-09-27) [minor]
+
+• Merge pull request #1586 from emperorsixpacks/main
+✨ feat: compliance reporting, validator scoring, partition response, an…
+✨ feat: compliance reporting, validator scoring, partition response, and multisig coordination
+• Implements comprehensive solutions for 4 major operator capabilities:
+• 1. Compliance Reporting for Regulated Validators (#1581)
+• - Added ComplianceReport Custom Resource Definition (compliance.stellar.org/v1alpha1)
+•   supporting automated periodic audits on configurable daily/weekly/cron schedules.
+• - Implemented RegulatoryReportGenerator in src/compliance/regulatory_report.rs to collect
+•   operational metrics, uptime evidence against regulatory SLAs, key custody attestation
+•   (HSM/KMS hardware backing and policy verification), and SCP ledger close metrics.
+• - Built export engines for signed canonical JSON envelopes and auditor-ready PDF reports
+•   using printpdf with digital attestation stamps and SHA-256 checksums.
+• - Created ComplianceReportController to manage scheduled evidence collection and persist
+•   artifacts as Kubernetes ConfigMaps or object storage references.
+• - Closes #1581
+• 2. Validator Performance Scoring and Leaderboard (#1579)
+• - Added ValidatorScore and ValidatorLeaderboard CRDs (stellar.org/v1alpha1) for automated
+•   hourly validator performance grading and multi-cluster federation aggregation.
+• - Implemented ValidatorScoringEngine in src/controller/validator_scoring.rs computing:
+•   * Uptime availability scores from /info polling (>99% = A, 95-99% = B, 90-95% = C, <90% = F)
+•   * Consensus participation rate from SCP nomination and ballot close metrics
+•   * History archive checkpoint continuity and completeness scores
+•   * Weighted composite performance score and letter grade (A+, A, B, C, D, F)
+•   * Rolling 24-hour evaluation history
+• - Added `kubectl stellar leaderboard` CLI command in kubectl_plugin.rs displaying
+•   ranked validator performance tables.
+• - Exposed GET /api/v1/validators/leaderboard in operator REST API.
+• - Closes #1579
+• 3. Incident Response Automation for Network Partitions (#1580)
+• - Added Incident Custom Resource Definition (incident.stellar.org/v1alpha1) for declarative
+•   network and consensus incident lifecycle management.
+• - Implemented PartitionIncidentDetector in src/incident/partition_detector.rs:
+•   * Detects network partitions within 3 consecutive missed ledger closes (~15 seconds)
+•   * Auto-dispatches emergency alerts to Slack, Webhook, and PagerDuty within 30s SLA
+•   * Automatically populates Incident CR status with chronological diagnostic timelines
+•   * Analyzes quorum health and computes safety-verified quorum adjustment recommendations
+•     (adjusted validator sets and new Byzantine fault-tolerant thresholds).
+• - Closes #1580
+• 4. Multi-Signature Coordination for Administrative Operations (#1578)
+• - Added MultiSigOperation Custom Resource Definition (stellar.org/v1alpha1) coordinating
+•   M-of-N signature collection for administrative operations (settings upgrades, signer changes).
+• - Implemented MultiSigController in src/controller/multisig_controller.rs:
+•   * Gathers cryptographic signatures by querying signer sidecars or secret stores
+•   * Enforces timeout deadlines and marks operations expired if threshold is unreached
+•   * Exposes real-time partial signature progress (collected signatures, missing signers)
+•   * Maintains an append-only audit trail recording actors, public keys, and timestamps
+•   * Automatically submits assembled transactions to the Stellar network upon reaching quorum.
+• - Closes #1578
+
+
 ## Chart v2.6.0 (2026-09-26) [minor]
 
 • Merge pull request #1546 from kingksjo/feat/epics-1495-1498-platform-frameworks

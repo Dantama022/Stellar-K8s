@@ -16,8 +16,10 @@ pub mod baseline;
 pub mod evaluator;
 pub mod remediation;
 pub mod audit;
+pub mod policy_drift;
 
 pub use baseline::{SecurityBaseline, BaselineSpec, BaselineStatus, BaselineCheck, CheckResult, CheckSeverity};
 pub use evaluator::{BaselineEvaluator, EvaluatorConfig, EvaluationResult};
 pub use remediation::{BaselineRemediator, RemediationConfig, RemediationAction, RemediationResult};
 pub use audit::{BaselineAuditLog, AuditEntry, AuditConfig};
+pub use policy_drift::{GitOpsProposalClient, GitOpsProposal, GitOpsPullRequest, PolicyDriftCase, PolicyDriftCaseStatus, PolicyDriftLoop, WebhookGitOpsClient};

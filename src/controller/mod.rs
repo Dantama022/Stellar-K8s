@@ -127,9 +127,12 @@ pub mod kms_secret;
 pub mod lifecycle_hooks;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+#[cfg(feature = "metrics")]
+pub mod asset_monitor;
 pub mod mtls;
 pub mod mtls_rotation;
 pub mod oci_snapshot;
+pub mod ledger_migration;
 pub mod operator_config;
 pub mod ownership_registry;
 pub mod peer_discovery;
@@ -141,6 +144,7 @@ pub mod pruning_reconciler;
 pub mod pruning_worker;
 pub mod quorum;
 pub mod read_pool;
+pub mod testnet_compliance;
 pub(crate) mod reconciler;
 #[cfg(test)]
 mod reconciler_test;
@@ -171,6 +175,9 @@ pub mod vpa;
 pub(crate) mod vsl;
 pub mod webhook_delivery;
 pub mod zk_archive_verifier;
+
+// Issue #1577 — Ledger-Close Webhook Dispatcher
+pub mod ledger_close_dispatcher;
 
 pub use anomaly_detection::{run_anomaly_detection, AnomalyDetector, AnomalyEvent};
 pub use archive_health::{
@@ -265,4 +272,8 @@ pub mod orphan_audit;
 pub mod pvc_autoscaler;
 pub mod resource_optimization;
 
+// Issue #1577 — Ledger-Close Webhook Dispatcher exports
+pub use ledger_close_dispatcher::{
+    run_ledger_close_poll_loop, LedgerCloseDispatcher,
+};
 pub use orphan_audit::{OrphanAuditReport, OrphanAuditor, OrphanedResource};
