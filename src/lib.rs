@@ -147,6 +147,7 @@ pub mod migration_safety;
 pub mod network_observability;
 pub mod node_boot_verification;
 pub mod plugin_sdk;
+pub mod policy_promotion;
 pub mod preflight;
 pub mod profiling;
 pub mod progressive_config;
