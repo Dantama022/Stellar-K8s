@@ -148,6 +148,8 @@ pub mod node_boot_verification;
 pub mod plugin_sdk;
 pub mod preflight;
 pub mod profiling;
+pub mod replica_quotas;
+pub mod reproducible_build;
 pub mod runbook;
 pub mod scheduler;
 pub mod schema_evolution;
