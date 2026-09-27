@@ -127,9 +127,12 @@ pub mod kms_secret;
 pub mod lifecycle_hooks;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+#[cfg(feature = "metrics")]
+pub mod asset_monitor;
 pub mod mtls;
 pub mod mtls_rotation;
 pub mod oci_snapshot;
+pub mod ledger_migration;
 pub mod operator_config;
 pub mod ownership_registry;
 pub mod peer_discovery;

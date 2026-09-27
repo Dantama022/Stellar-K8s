@@ -84,6 +84,7 @@ use super::maintenance;
 use super::metrics;
 use super::mtls;
 use super::oci_snapshot;
+use super::ledger_migration;
 use super::operator_config::{hardcoded_defaults, OperatorConfig};
 use super::peer_discovery;
 use super::phases::{PhaseMachine, ReconcilePhase};
@@ -1149,6 +1150,53 @@ pub(crate) fn apply_stellar_node(
                 }
             )
             .await?;
+
+            if node
+                .metadata
+                .annotations
+                .as_ref()
+                .and_then(|annotations| annotations.get("stellar.org/request-ledger-export"))
+                .is_some_and(|value| value == "true" || value == "1")
+            {
+                if let Some(export) = node
+                    .spec
+                    .storage
+                    .snapshot_ref
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.export.as_ref())
+                {
+                    let ledger_seq = node
+                        .status
+                        .as_ref()
+                        .and_then(|status| status.ledger_sequence)
+                        .unwrap_or(0);
+                    if ledger_seq > 0
+                        && ledger_migration::ensure_export_job(
+                            &client,
+                            &node,
+                            export,
+                            ledger_seq,
+                        )
+                        .await?
+                        .is_some()
+                    {
+                        let api: Api<StellarNode> = Api::namespaced(client.clone(), &namespace);
+                        api.patch(
+                            &name,
+                            &PatchParams::default(),
+                            &Patch::Merge(serde_json::json!({
+                                "metadata": { "annotations": { "stellar.org/request-ledger-export": null } }
+                            })),
+                        )
+                        .await?;
+                    }
+                } else {
+                    warn!(
+                        "Ledger export requested for {}/{} without storage.snapshotRef.export",
+                        namespace, name
+                    );
+                }
+            }
 
             return Ok(Action::requeue(Duration::from_secs(60)));
         }

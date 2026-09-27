@@ -217,6 +217,42 @@ pub struct HorizonMigrationLabels {
     pub status: String, // "success" or "failed"
 }
 
+/// Labels identifying one watched Stellar asset.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct AssetLabels {
+    pub namespace: String,
+    pub monitor: String,
+    pub network: String,
+    pub asset_code: String,
+    pub issuer: String,
+    pub contract_id: String,
+}
+
+/// Current asset supply in stroops (1 asset unit = 10^7 stroops).
+pub static ASSET_SUPPLY_STROOPS: Lazy<Family<AssetLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Current number of accounts holding the watched asset.
+pub static ASSET_HOLDERS: Lazy<Family<AssetLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Current asset liquidity in stroops.
+pub static ASSET_LIQUIDITY_STROOPS: Lazy<Family<AssetLabels, Gauge<i64, AtomicI64>>> =
+    Lazy::new(Family::default);
+
+/// Signed supply change percentage observed in the most recently processed ledger.
+pub static ASSET_SUPPLY_CHANGE_PERCENT: Lazy<Family<AssetLabels, Gauge<f64, AtomicU64>>> =
+    Lazy::new(Family::default);
+
+/// Number of large supply changes observed for a watched asset.
+pub static ASSET_LARGE_SUPPLY_CHANGES_TOTAL: Lazy<
+    Family<AssetLabels, Counter<u64, AtomicU64>>,
+> = Lazy::new(Family::default);
+
+/// Number of clawback ledger changes observed for the watched asset.
+pub static ASSET_CLAWBACK_EVENTS_TOTAL: Lazy<Family<AssetLabels, Counter<u64, AtomicU64>>> =
+    Lazy::new(Family::default);
+
 /// Histogram tracking reconcile duration (seconds)
 pub static RECONCILE_DURATION_SECONDS: Lazy<Family<ReconcileLabels, Histogram>> = Lazy::new(|| {
     fn reconcile_histogram() -> Histogram {
@@ -594,6 +630,37 @@ pub static REGISTRY: Lazy<Registry> = Lazy::new(|| {
         "stellar_snapshot_integrity_check_duration_ms",
         "Duration of snapshot integrity check in milliseconds",
         SNAPSHOT_INTEGRITY_CHECK_DURATION_MS.clone(),
+    );
+
+    registry.register(
+        "stellar_asset_supply_stroops",
+        "Current watched asset supply in stroops",
+        ASSET_SUPPLY_STROOPS.clone(),
+    );
+    registry.register(
+        "stellar_asset_holders",
+        "Current number of accounts holding a watched asset",
+        ASSET_HOLDERS.clone(),
+    );
+    registry.register(
+        "stellar_asset_liquidity_stroops",
+        "Current watched asset liquidity in stroops",
+        ASSET_LIQUIDITY_STROOPS.clone(),
+    );
+    registry.register(
+        "stellar_asset_supply_change_percent",
+        "Signed supply change percentage observed in the latest ledger",
+        ASSET_SUPPLY_CHANGE_PERCENT.clone(),
+    );
+    registry.register(
+        "stellar_asset_large_supply_changes_total",
+        "Number of supply changes above the monitor's configured threshold",
+        ASSET_LARGE_SUPPLY_CHANGES_TOTAL.clone(),
+    );
+    registry.register(
+        "stellar_asset_clawback_events_total",
+        "Total observed clawback ledger changes for watched assets",
+        ASSET_CLAWBACK_EVENTS_TOTAL.clone(),
     );
 
     registry.register(
