@@ -44,6 +44,20 @@ spec:
           annotations:
             summary: 'Stellar node {{ `{{ $labels.node_name }}` }} ledger close time is high'
             description: 'Ledger close time is {{ `{{ $value }}` }}s, above the {{ .Values.monitoring.prometheusRule.ledgerCloseTimeThresholdSeconds }}s threshold.'
+        - alert: StellarAssetLargeSupplyChange
+          expr: increase(stellar_asset_large_supply_changes_total[5m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Large supply change for {{ `{{ $labels.asset_code }}` }}'
+            description: 'Watched asset {{ `{{ $labels.asset_code }}` }} on {{ `{{ $labels.network }}` }} exceeded its configured supply-change threshold.'
+        - alert: StellarAssetClawback
+          expr: increase(stellar_asset_clawback_events_total[5m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Clawback observed for {{ `{{ $labels.asset_code }}` }}'
+            description: 'A clawback ledger change was observed for watched asset {{ `{{ $labels.asset_code }}` }}.'
         {{- with .Values.monitoring.prometheusRule.additionalRules }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

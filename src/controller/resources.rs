@@ -2011,6 +2011,9 @@ fn build_pod_template(
                 backup_url,
                 snapshot_ref.credentials_secret_ref.as_deref(),
                 snapshot_ref.restore_image.as_deref(),
+                snapshot_ref.sha256.as_deref(),
+                snapshot_ref.expected_ledger_sequence,
+                snapshot_ref.expected_network.as_deref(),
             ));
         }
     }
@@ -3499,6 +3502,9 @@ fn build_snapshot_restore_container(
     backup_url: &str,
     credentials_secret_ref: Option<&str>,
     restore_image: Option<&str>,
+    expected_sha256: Option<&str>,
+    expected_ledger_sequence: Option<u64>,
+    expected_network: Option<&str>,
 ) -> Container {
     // Choose a sensible default image based on the URL scheme.
     let image = restore_image.map(|s| s.to_string()).unwrap_or_else(|| {
@@ -3521,37 +3527,65 @@ fn build_snapshot_restore_container(
     let script = if backup_url.starts_with("s3://") {
         format!(
             r#"set -e
-# Skip restore if data volume already has content (idempotent)
-if [ "$(ls -A /data 2>/dev/null)" ]; then
+# Skip restore after a previously verified import.
+if [ -f /data/.stellar-ledger-restore-complete ]; then
   echo "Data volume already populated, skipping snapshot restore."
   exit 0
 fi
-echo "Restoring from S3 snapshot: {url}"
-aws s3 cp "{url}" /tmp/snapshot.archive
+# ext4 may create lost+found on a new PVC; that alone is not existing ledger state.
+if find /data -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit | grep -q .; then
+    echo "Data volume already populated, skipping snapshot restore."
+    exit 0
+fi
+echo "Restoring from S3 snapshot: $BACKUP_URL"
+aws s3 cp "$BACKUP_URL" /tmp/snapshot.archive
+if [ -z "$EXPECTED_SHA256" ]; then
+    if aws s3 cp "$BACKUP_URL.sha256" /tmp/snapshot.archive.sha256; then
+        EXPECTED_SHA256=$(cut -d ' ' -f 1 /tmp/snapshot.archive.sha256)
+    fi
+fi
+if [ -n "$EXPECTED_SHA256" ]; then echo "$EXPECTED_SHA256  /tmp/snapshot.archive" | sha256sum -c -; else echo 'WARNING: restoring without an archive checksum'; fi
 echo "Extracting archive..."
 tar {decompress} -xf /tmp/snapshot.archive -C /data
-rm -f /tmp/snapshot.archive
-echo "Snapshot restore complete."
+if [ -f /data/files.sha256 ]; then (cd /data && sha256sum -c files.sha256); fi
+if [ -n "$EXPECTED_LEDGER_SEQUENCE" ]; then grep -Fx "ledger_sequence=$EXPECTED_LEDGER_SEQUENCE" /data/snapshot-manifest.txt; fi
+if [ -n "$EXPECTED_NETWORK" ]; then grep -Fx "network=$EXPECTED_NETWORK" /data/snapshot-manifest.txt; fi
+rm -f /data/files.sha256 /data/snapshot-manifest.txt /tmp/snapshot.archive /tmp/snapshot.archive.sha256
+touch /data/.stellar-ledger-restore-complete
+echo "Snapshot restore and verification complete."
 "#,
-            url = backup_url,
             decompress = decompress_flag,
         )
     } else {
         format!(
             r#"set -e
-# Skip restore if data volume already has content (idempotent)
-if [ "$(ls -A /data 2>/dev/null)" ]; then
+# Skip restore after a previously verified import.
+if [ -f /data/.stellar-ledger-restore-complete ]; then
   echo "Data volume already populated, skipping snapshot restore."
   exit 0
 fi
-echo "Restoring from backup: {url}"
-wget -q -O /tmp/snapshot.archive "{url}" || curl -fsSL -o /tmp/snapshot.archive "{url}"
+# ext4 may create lost+found on a new PVC; that alone is not existing ledger state.
+if find /data -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit | grep -q .; then
+    echo "Data volume already populated, skipping snapshot restore."
+    exit 0
+fi
+echo "Restoring from backup: $BACKUP_URL"
+wget -q -O /tmp/snapshot.archive "$BACKUP_URL" || curl -fsSL -o /tmp/snapshot.archive "$BACKUP_URL"
+if [ -z "$EXPECTED_SHA256" ]; then
+    if wget -q -O /tmp/snapshot.archive.sha256 "$BACKUP_URL.sha256" || curl -fsSL -o /tmp/snapshot.archive.sha256 "$BACKUP_URL.sha256"; then
+        EXPECTED_SHA256=$(cut -d ' ' -f 1 /tmp/snapshot.archive.sha256)
+    fi
+fi
+if [ -n "$EXPECTED_SHA256" ]; then echo "$EXPECTED_SHA256  /tmp/snapshot.archive" | sha256sum -c -; else echo 'WARNING: restoring without an archive checksum'; fi
 echo "Extracting archive..."
 tar {decompress} -xf /tmp/snapshot.archive -C /data
-rm -f /tmp/snapshot.archive
-echo "Snapshot restore complete."
+if [ -f /data/files.sha256 ]; then (cd /data && sha256sum -c files.sha256); fi
+if [ -n "$EXPECTED_LEDGER_SEQUENCE" ]; then grep -Fx "ledger_sequence=$EXPECTED_LEDGER_SEQUENCE" /data/snapshot-manifest.txt; fi
+if [ -n "$EXPECTED_NETWORK" ]; then grep -Fx "network=$EXPECTED_NETWORK" /data/snapshot-manifest.txt; fi
+rm -f /data/files.sha256 /data/snapshot-manifest.txt /tmp/snapshot.archive /tmp/snapshot.archive.sha256
+touch /data/.stellar-ledger-restore-complete
+echo "Snapshot restore and verification complete."
 "#,
-            url = backup_url,
             decompress = decompress_flag,
         )
     };
@@ -3560,6 +3594,18 @@ echo "Snapshot restore complete."
     let mut env: Vec<EnvVar> = vec![EnvVar {
         name: "BACKUP_URL".to_string(),
         value: Some(backup_url.to_string()),
+        ..Default::default()
+    }, EnvVar {
+        name: "EXPECTED_SHA256".to_string(),
+        value: expected_sha256.map(str::to_string),
+        ..Default::default()
+    }, EnvVar {
+        name: "EXPECTED_LEDGER_SEQUENCE".to_string(),
+        value: expected_ledger_sequence.map(|sequence| sequence.to_string()),
+        ..Default::default()
+    }, EnvVar {
+        name: "EXPECTED_NETWORK".to_string(),
+        value: expected_network.map(str::to_string),
         ..Default::default()
     }];
 

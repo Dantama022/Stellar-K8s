@@ -79,6 +79,7 @@ pub mod stellar_benchmark;
 pub mod stellar_federation;
 pub mod stellar_network_policy;
 mod stellar_node;
+pub mod stellar_asset_monitor;
 pub mod stellar_observability;
 pub mod stellar_performance;
 pub mod stellar_topology;
@@ -172,6 +173,9 @@ pub use stellar_network_policy::{
 pub use stellar_node::{
     BGPStatus, SnapshotBootstrapStatus, SpecValidationError, StellarNode, StellarNodeSpec,
     StellarNodeStatus,
+};
+pub use stellar_asset_monitor::{
+    AssetWatch, StellarAssetMonitor, StellarAssetMonitorSpec,
 };
 pub use stellar_observability::{
     AlertRule, AlertingConfig, AnomalyDetectionConfig, AnomalyModel, AnomalySensitivity,
