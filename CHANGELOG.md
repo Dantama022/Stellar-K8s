@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.10.0 (2026-09-27) [minor]
+
+• Merge pull request #1596 from NanaKhadija1980j/fix/1517-versioned-policy-as-code-promotion-pipeline-from-dev-to-prod
+• [1517] [EPIC] Versioned Policy-as-Code Promotion Pipeline from Dev to Prod
+✨ feat(policy): versioned policy-as-code promotion pipeline (#1517)
+• Policy changes were applied by editing YAML per environment by hand, so dev,
+• staging and prod drifted and bad rules surfaced only in production. Model
+• promotion as an artifact promotion flow instead.
+• - Immutable, versioned bundles: PolicyBundle is content addressed over its
+•   version and rules; is_intact() detects mutation and promote() refuses a
+•   bundle edited after creation, so what staging validated is what prod gets.
+• - Dry-run impact analysis: analyze_impact() evaluates a bundle against a
+•   PolicyInventory per environment. It is pure and side-effect free, so CI can
+•   run it on every change. An overbroad rule is blocked before enforcement.
+• - Staged enforcement: every environment starts at Audit and advances exactly
+•   one step per call (audit -> warn -> enforce), tracked per environment.
+• - One-command rollback: rollback() restores the previous bundle in all
+•   environments, resets enforcement to Audit, and reports the duration
+•   against ROLLBACK_SLA_MS (60s).
+• Promotion follows the dev -> staging -> production order and refuses to skip
+• a link in the chain.
+
+
 ## Chart v2.9.0 (2026-09-27) [minor]
 
 • Merge pull request #1594 from NanaKhadija1980j/fix/1519-progressive-config-rollout-with-canary-evaluation-for-operator-settings
