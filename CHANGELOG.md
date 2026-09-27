@@ -3,6 +3,44 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.9.0 (2026-09-27) [minor]
+
+• Merge pull request #1594 from NanaKhadija1980j/fix/1519-progressive-config-rollout-with-canary-evaluation-for-operator-settings
+• [1519] [EPIC] Progressive Config Rollout with Canary Evaluation for Operator Settings
+• Merge pull request #1593 from NanaKhadija1980j/fix/1520-automated-dependency-upgrade-validation-with-contract-tests
+• [1520] [EPIC] Automated Dependency Upgrade Validation with Contract Tests
+✨ feat(config): progressive config rollout with canary evaluation (#1519)
+• Operator configuration used to be applied to every StellarNode at once, so a
+• single bad setting took the whole fleet down. This reuses progressive-delivery
+• machinery for configuration:
+• - Canary first: select_canary() picks a deterministic subset whose size never
+•   exceeds MAX_BLAST_RADIUS (5%) of the target set, spread across namespaces by
+•   an even stride over the sorted target list.
+• - Gates during the canary window: HealthGate/HealthSample evaluate the
+•   canary. Passed promotes to Propagating, Failed or Incomplete never does.
+• - Automatic rollback: gate_or_rollback() restores the previous bundle on gate
+•   failure and records the measured duration against ROLLBACK_SLA_MS (30s).
+• - Queryable versions: every target records the ConfigBundle version and digest
+•   it is running, so 'which config is this node on?' is always answerable.
+• - Stage machine (Idle -> Canary -> Propagating -> Complete, plus RolledBack)
+•   guarantees no config change propagates without a gate pass.
+• Merge origin/main into fix/1520-automated-dependency-upgrade-validation-with-contract-tests
+🐛 fix(license): repair license headers with an import spliced into them
+• Ten source files had use std::collections::BTreeMap; inserted as line 2,
+• inside the Apache-2.0 header block and before the module's inner doc
+• comment, which makes the inner doc comment a syntax error (E0753) and the
+• whole crate fail to build. Move the import into the import block.
+✨ feat(deps): automated dependency upgrade validation with generated contract tests (#1520)
+• Replaces manual dependency upgrade reviews with a mechanical merge gate:
+• - Contract test generation from existing consumer call sites, so the suite
+•   tracks real usage without dedicated authoring effort.
+• - Compatibility matrix auto-constructed from the generated suite.
+• - Incompatible upgrades are blocked with consumer attribution (consumer name
+•   plus the file:line call sites responsible).
+• - Approved upgrades carry a signed validation artifact (suite digest,
+•   matrix digest, SHA-256 signature).
+
+
 ## Chart v2.8.0 (2026-09-27) [minor]
 
 • Merge pull request #1592 from Otaiki1/prmaster/1567-1568-1566-1569-4-issues-1567-1568-1566-1569-85543a
