@@ -18,6 +18,8 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::policy_drift::PolicyDriftCase;
+
 /// Security baseline custom resource
 #[derive(CustomResource, Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[kube(
@@ -132,6 +134,9 @@ pub struct BaselineStatus {
     /// Per-namespace results
     #[serde(default)]
     pub namespace_results: BTreeMap<String, NamespaceBaselineResult>,
+    /// Remediation cases tracked from detection through verification
+    #[serde(default)]
+    pub drift_cases: BTreeMap<String, PolicyDriftCase>,
     /// Conditions
     #[serde(default)]
     pub conditions: Vec<BaselineCondition>,
