@@ -76,6 +76,9 @@ pub mod stellar_gitops;
 pub mod stellar_registry;
 pub mod stellar_security;
 
+// Issue #1577 — Webhook Event Delivery for Ledger Close Notifications
+pub mod ledger_close_webhook;
+
 #[cfg(test)]
 mod tests;
 
@@ -178,4 +181,10 @@ pub use stellar_security::{
     NetworkPoliciesConfig, PodSecurityLevel, PodSecurityStandardsConfig, RBACConfig,
     SecretManagementConfig, SecretProvider, SecurityMonitoringConfig, StellarSecurityPolicy,
     StellarSecurityPolicySpec, StellarSecurityPolicyStatus,
+};
+
+// Issue #1577 — Ledger-Close Webhook CRD exports
+pub use ledger_close_webhook::{
+    DeliveryLogEntry, DeliveryPhase, LedgerCloseEventType, LedgerClosePayload,
+    LedgerCloseWebhook, LedgerCloseWebhookSpec, LedgerCloseWebhookStatus,
 };

@@ -150,6 +150,9 @@ pub(crate) mod vsl;
 pub mod webhook_delivery;
 pub mod zk_archive_verifier;
 
+// Issue #1577 — Ledger-Close Webhook Dispatcher
+pub mod ledger_close_dispatcher;
+
 pub use anomaly_detection::{run_anomaly_detection, AnomalyDetector, AnomalyEvent};
 pub use archive_health::{
     calculate_backoff, check_archive_integrity, check_history_archive_health, ArchiveHealthResult,
@@ -227,3 +230,8 @@ pub mod observability_dashboard;
 pub mod observability_pipeline;
 pub mod pvc_autoscaler;
 pub mod resource_optimization;
+
+// Issue #1577 — Ledger-Close Webhook Dispatcher exports
+pub use ledger_close_dispatcher::{
+    run_ledger_close_poll_loop, LedgerCloseDispatcher,
+};
