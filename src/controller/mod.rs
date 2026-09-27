@@ -144,6 +144,7 @@ pub mod pruning_reconciler;
 pub mod pruning_worker;
 pub mod quorum;
 pub mod read_pool;
+pub mod testnet_compliance;
 pub(crate) mod reconciler;
 #[cfg(test)]
 mod reconciler_test;
@@ -174,14 +175,6 @@ pub mod vpa;
 pub(crate) mod vsl;
 pub mod webhook_delivery;
 pub mod zk_archive_verifier;
-pub mod compliance_report_controller;
-pub mod multisig_controller;
-pub mod validator_scoring;
-
-pub use compliance_report_controller::ComplianceReportController;
-pub use multisig_controller::MultiSigController;
-pub use validator_scoring::ValidatorScoringEngine;
-
 
 // Issue #1577 — Ledger-Close Webhook Dispatcher
 pub mod ledger_close_dispatcher;
