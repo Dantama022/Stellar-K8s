@@ -948,6 +948,12 @@ webhook:
   # cannot bypass admission policy.
   failurePolicy: Fail
 
+  # Degradation mode for a webhook-layer outage (#1494): strict or permissive.
+  # permissive forces failurePolicy Ignore so an outage never blocks admission
+  # (including pod startup). Pair with `webhookMode: Permissive` on the
+  # ControlPlaneHealth resource so the operator corrects any drift.
+  mode: strict
+
   # Resource requests and limits for the webhook server container.
   resources:
     requests:
