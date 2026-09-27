@@ -106,6 +106,9 @@ pub mod service_ownership;
 pub mod stellar_registry;
 pub mod stellar_security;
 
+// Issue #1577 — Webhook Event Delivery for Ledger Close Notifications
+pub mod ledger_close_webhook;
+
 #[cfg(test)]
 mod tests;
 
@@ -238,6 +241,11 @@ pub use stellar_security::{
     StellarSecurityPolicySpec, StellarSecurityPolicyStatus,
 };
 
+// Issue #1577 — Ledger-Close Webhook CRD exports
+pub use ledger_close_webhook::{
+    DeliveryLogEntry, DeliveryPhase, LedgerCloseEventType, LedgerClosePayload,
+    LedgerCloseWebhook, LedgerCloseWebhookSpec, LedgerCloseWebhookStatus,
+};
 pub use compliance_report::{
     ComplianceCondition, ComplianceReport, ComplianceReportFormat, ComplianceReportPhase,
     ComplianceReportSpec, ComplianceReportStatus, GeneratedArtifactRef, HsmKmsVerificationSpec,
