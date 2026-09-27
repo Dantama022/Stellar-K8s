@@ -1,5 +1,4 @@
 // Copyright 2024 Stellar-K8s Contributors
-use std::collections::BTreeMap;
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,6 +12,7 @@ use std::collections::BTreeMap;
 // limitations under the License.
 //! Cost allocation for metric cardinality
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
