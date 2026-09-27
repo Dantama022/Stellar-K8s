@@ -3,6 +3,104 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.7.0 (2026-09-27) [minor]
+
+• Merge pull request #1586 from emperorsixpacks/main
+✨ feat: compliance reporting, validator scoring, partition response, an…
+✨ feat: compliance reporting, validator scoring, partition response, and multisig coordination
+• Implements comprehensive solutions for 4 major operator capabilities:
+• 1. Compliance Reporting for Regulated Validators (#1581)
+• - Added ComplianceReport Custom Resource Definition (compliance.stellar.org/v1alpha1)
+•   supporting automated periodic audits on configurable daily/weekly/cron schedules.
+• - Implemented RegulatoryReportGenerator in src/compliance/regulatory_report.rs to collect
+•   operational metrics, uptime evidence against regulatory SLAs, key custody attestation
+•   (HSM/KMS hardware backing and policy verification), and SCP ledger close metrics.
+• - Built export engines for signed canonical JSON envelopes and auditor-ready PDF reports
+•   using printpdf with digital attestation stamps and SHA-256 checksums.
+• - Created ComplianceReportController to manage scheduled evidence collection and persist
+•   artifacts as Kubernetes ConfigMaps or object storage references.
+• - Closes #1581
+• 2. Validator Performance Scoring and Leaderboard (#1579)
+• - Added ValidatorScore and ValidatorLeaderboard CRDs (stellar.org/v1alpha1) for automated
+•   hourly validator performance grading and multi-cluster federation aggregation.
+• - Implemented ValidatorScoringEngine in src/controller/validator_scoring.rs computing:
+•   * Uptime availability scores from /info polling (>99% = A, 95-99% = B, 90-95% = C, <90% = F)
+•   * Consensus participation rate from SCP nomination and ballot close metrics
+•   * History archive checkpoint continuity and completeness scores
+•   * Weighted composite performance score and letter grade (A+, A, B, C, D, F)
+•   * Rolling 24-hour evaluation history
+• - Added `kubectl stellar leaderboard` CLI command in kubectl_plugin.rs displaying
+•   ranked validator performance tables.
+• - Exposed GET /api/v1/validators/leaderboard in operator REST API.
+• - Closes #1579
+• 3. Incident Response Automation for Network Partitions (#1580)
+• - Added Incident Custom Resource Definition (incident.stellar.org/v1alpha1) for declarative
+•   network and consensus incident lifecycle management.
+• - Implemented PartitionIncidentDetector in src/incident/partition_detector.rs:
+•   * Detects network partitions within 3 consecutive missed ledger closes (~15 seconds)
+•   * Auto-dispatches emergency alerts to Slack, Webhook, and PagerDuty within 30s SLA
+•   * Automatically populates Incident CR status with chronological diagnostic timelines
+•   * Analyzes quorum health and computes safety-verified quorum adjustment recommendations
+•     (adjusted validator sets and new Byzantine fault-tolerant thresholds).
+• - Closes #1580
+• 4. Multi-Signature Coordination for Administrative Operations (#1578)
+• - Added MultiSigOperation Custom Resource Definition (stellar.org/v1alpha1) coordinating
+•   M-of-N signature collection for administrative operations (settings upgrades, signer changes).
+• - Implemented MultiSigController in src/controller/multisig_controller.rs:
+•   * Gathers cryptographic signatures by querying signer sidecars or secret stores
+•   * Enforces timeout deadlines and marks operations expired if threshold is unreached
+•   * Exposes real-time partial signature progress (collected signatures, missing signers)
+•   * Maintains an append-only audit trail recording actors, public keys, and timestamps
+•   * Automatically submits assembled transactions to the Stellar network upon reaching quorum.
+• - Closes #1578
+
+
+## Chart v2.6.0 (2026-09-26) [minor]
+
+• Merge pull request #1546 from kingksjo/feat/epics-1495-1498-platform-frameworks
+• Platform frameworks: hot-reload, secrets broker, rollback engine, data residency
+• Merge pull request #1547 from De-hunterJS/feat/k8s-compat-dataplane-snapshot-cert-automation-api-deprecation
+✨ feat: implement k8s-compat-matrix, dataplane-snapshots, cert-automati…
+✨ feat: implement k8s-compat-matrix, dataplane-snapshots, cert-automation, deprecated-api-detection
+• Adds four major automation features:
+• 1. Kubernetes Compatibility Matrix
+•    - Tests operator against 6 K8s versions (1.27-1.32, covering N and N-1)
+•    - Detects upstream pre-releases within 24h
+•    - Publishes matrix results as badge + JSON artifact
+•    - Completes full matrix in <60 minutes
+• 2. Dataplane Configuration Snapshots
+•    - New StellarConfigSnapshot CRD for versioned configs
+•    - Content-addressed by Merkle root (SHA-256)
+•    - Delta snapshots reduce bandwidth by >=80% for large configs
+•    - Agents perform atomic verify + swap (no partial state)
+• 3. Certificate Automation
+•    - Short-lived certs (<=24h) issued automatically
+•    - Hot-reload without process restart (inotify + atomic writes)
+•    - Revocation detection propagates in <60s cluster-wide
+•    - Certificate inventory visible as queryable CRs
+• 4. Deprecated API Usage Detection
+•    - End-to-end detection via audit logs + metrics
+•    - Attribution to owning team via namespace labels
+•    - Weekly migration reports (CSV, HTML, JSON)
+•    - Phase-based enforcement: warn -> deny without webhook restart
+• Acceptance Criteria Met:
+• ✓ K8s matrix covers N and N-1 minors (1.31, 1.32)
+• ✓ Snapshot generation <2s for 10k objects
+• ✓ Delta compression >= 80% bandwidth reduction
+• ✓ Cert rotation without request drops
+• ✓ API deprecation detection >= 99% accuracy
+• Files Added:
+• - tests/compat_matrix.rs (extended with 6 versions)
+• - .github/workflows/k8s-compat-matrix-advanced.yml
+• - config/crd/stellar_config_snapshot_crd.yaml
+• - src/crd/config_snapshot.rs
+• - src/controller/cert_automation.rs
+• - src/controller/api_deprecation_detector.rs
+• - docs/AUTOMATION_FEATURES.md
+• - scripts/ci/generate-badge.sh
+✨ feat: shared platform frameworks for #1498 hot-reload, #1497 secrets broker, #1496 rollback engine, #1495 data residency
+
+
 ## Chart v2.5.0 (2026-09-26) [minor]
 
 • Merge pull request #1538 from broda-spendy/epic-1509-dynamic-rate-limiting
