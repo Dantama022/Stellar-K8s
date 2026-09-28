@@ -3895,6 +3895,56 @@ async fn run_archive_integrity_check(
         );
     }
 
+    // Check history archive version compatibility against core binary version before catchup
+    let compat_results = crate::controller::archive_health::check_archives_version_compatibility(
+        archive_urls,
+        &node.spec.version,
+        Some(std::time::Duration::from_secs(5)),
+    )
+    .await;
+
+    let incompatible: Vec<_> = compat_results.iter().filter(|r| !r.is_compatible).collect();
+    if !incompatible.is_empty() {
+        let msg = incompatible
+            .iter()
+            .map(|r| r.summary())
+            .collect::<Vec<_>>()
+            .join("; ");
+        warn!(
+            "Incompatible history archive version detected for {}/{}: {}",
+            namespace, name, msg
+        );
+        publish_stellar_event!(
+            client,
+            reporter,
+            node,
+            EventType::Warning,
+            "ArchiveVersionIncompatible",
+            "ArchiveCompatibility",
+            &msg,
+        )
+        .await?;
+        conditions::set_condition(
+            &mut conds,
+            "ArchiveVersionCompatible",
+            conditions::CONDITION_STATUS_FALSE,
+            "IncompatibleArchiveVersion",
+            &msg,
+        );
+    } else {
+        conditions::set_condition(
+            &mut conds,
+            "ArchiveVersionCompatible",
+            conditions::CONDITION_STATUS_TRUE,
+            "ArchiveCompatible",
+            &format!(
+                "All {} configured archive(s) are state-version compatible with stellar-core {}",
+                archive_urls.len(),
+                node.spec.version
+            ),
+        );
+    }
+
     let patch = serde_json::json!({ "status": { "conditions": conds } });
     api.patch_status(
         &name,

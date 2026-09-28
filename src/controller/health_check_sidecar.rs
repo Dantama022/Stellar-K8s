@@ -25,6 +25,8 @@ use super::peer_connectivity::{
 #[derive(Clone)]
 pub struct HealthCheckState {
     pub core_url: String,
+    pub core_version: String,
+    pub archive_urls: Vec<String>,
     pub sync_status: Arc<RwLock<SyncStatus>>,
     /// Latest peer-connectivity round.
     ///
@@ -60,12 +62,38 @@ impl HealthCheckState {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+impl HealthCheckState {
+    pub fn new(core_url: String) -> Self {
+        Self {
+            core_url,
+            core_version: "v21.3.1".to_string(),
+            archive_urls: Vec::new(),
+            sync_status: Arc::new(RwLock::new(SyncStatus::default())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SyncStatus {
     pub is_synced: bool,
     pub ledger_num: u64,
     pub network_ledger: u64,
     pub last_check: i64,
+    pub archive_compatible: bool,
+    pub archive_error: Option<String>,
+}
+
+impl Default for SyncStatus {
+    fn default() -> Self {
+        Self {
+            is_synced: false,
+            ledger_num: 0,
+            network_ledger: 0,
+            last_check: 0,
+            archive_compatible: true,
+            archive_error: None,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -74,6 +102,10 @@ pub struct HealthResponse {
     pub synced: bool,
     pub ledger_num: u64,
     pub network_ledger: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_compatible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_error: Option<String>,
 }
 
 /// Body of the `/peers` endpoint.
@@ -98,6 +130,7 @@ pub fn create_router(state: HealthCheckState) -> Router {
     Router::new()
         .route("/healthz", get(liveness_handler))
         .route("/readyz", get(readiness_handler))
+        .route("/archive-compatibility", get(archive_compatibility_handler))
         .route("/peers", get(peers_handler))
         .with_state(state)
 }
@@ -112,6 +145,8 @@ async fn liveness_handler(State(state): State<HealthCheckState>) -> impl IntoRes
                 synced: false,
                 ledger_num: 0,
                 network_ledger: 0,
+                archive_compatible: None,
+                archive_error: None,
             }),
         ),
         Err(e) => {
@@ -123,6 +158,8 @@ async fn liveness_handler(State(state): State<HealthCheckState>) -> impl IntoRes
                     synced: false,
                     ledger_num: 0,
                     network_ledger: 0,
+                    archive_compatible: None,
+                    archive_error: None,
                 }),
             )
         }
@@ -131,6 +168,29 @@ async fn liveness_handler(State(state): State<HealthCheckState>) -> impl IntoRes
 
 async fn readiness_handler(State(state): State<HealthCheckState>) -> impl IntoResponse {
     let sync_status = state.sync_status.read().await;
+
+    // Incompatible archive version detected before catch-up starts
+    if !sync_status.archive_compatible {
+        let err_msg = sync_status
+            .archive_error
+            .clone()
+            .unwrap_or_else(|| "Incompatible history archive version detected".to_string());
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse {
+                status: format!("archive_incompatible: {}", err_msg),
+                synced: false,
+                ledger_num: sync_status.ledger_num,
+                network_ledger: sync_status.network_ledger,
+                archive_compatible: Some(false),
+                archive_error: Some(err_msg),
+            }),
+        );
+    }
+
+    if sync_status.is_synced {
+        (
+            StatusCode::OK,
     let peer_report = state.peer_connectivity.read().await;
     let peers_unreachable = match peer_report.as_ref() {
         Some(report) => report.is_fully_degraded(),
@@ -145,6 +205,8 @@ async fn readiness_handler(State(state): State<HealthCheckState>) -> impl IntoRe
                 synced: false,
                 ledger_num: sync_status.ledger_num,
                 network_ledger: sync_status.network_ledger,
+                archive_compatible: Some(true),
+                archive_error: None,
             }),
         );
     }
@@ -159,6 +221,8 @@ async fn readiness_handler(State(state): State<HealthCheckState>) -> impl IntoRe
                 synced: true,
                 ledger_num: sync_status.ledger_num,
                 network_ledger: sync_status.network_ledger,
+                archive_compatible: Some(sync_status.archive_compatible),
+                archive_error: sync_status.archive_error.clone(),
             }),
         );
     }
@@ -212,6 +276,25 @@ async fn peers_handler(State(state): State<HealthCheckState>) -> impl IntoRespon
     (code, Json(body))
 }
 
+async fn archive_compatibility_handler(
+    State(state): State<HealthCheckState>,
+) -> impl IntoResponse {
+    let sync_status = state.sync_status.read().await;
+    (
+        if sync_status.archive_compatible {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        },
+        Json(serde_json::json!({
+            "archiveCompatible": sync_status.archive_compatible,
+            "archiveError": sync_status.archive_error,
+            "coreVersion": state.core_version,
+            "archiveUrls": state.archive_urls,
+        })),
+    )
+}
+
 async fn check_core_alive(core_url: &str) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -241,13 +324,41 @@ pub async fn sync_monitor_loop(state: HealthCheckState) {
         .unwrap_or_default();
 
     loop {
+        // 1. Check archive version compatibility if archives are configured
+        if !state.archive_urls.is_empty() {
+            let compat_results = crate::controller::archive_health::check_archives_version_compatibility(
+                &state.archive_urls,
+                &state.core_version,
+                Some(std::time::Duration::from_secs(5)),
+            )
+            .await;
+
+            let mut sync_status = state.sync_status.write().await;
+            if let Some(incompat) = compat_results.iter().find(|r| !r.is_compatible) {
+                sync_status.archive_compatible = false;
+                sync_status.archive_error = incompat.error.clone();
+                error!(
+                    "History archive version incompatibility: {}",
+                    incompat.summary()
+                );
+            } else {
+                sync_status.archive_compatible = true;
+                sync_status.archive_error = None;
+            }
+        }
+
+        // 2. Check sync status
         match fetch_sync_status(&client, &state.core_url).await {
             Ok(status) => {
                 debug!(
                     "Sync status: ledger={}, network={}, synced={}",
                     status.ledger_num, status.network_ledger, status.is_synced
                 );
-                *state.sync_status.write().await = status;
+                let mut current = state.sync_status.write().await;
+                current.is_synced = status.is_synced;
+                current.ledger_num = status.ledger_num;
+                current.network_ledger = status.network_ledger;
+                current.last_check = status.last_check;
             }
             Err(e) => {
                 error!("Failed to fetch sync status: {}", e);
