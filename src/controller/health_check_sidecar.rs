@@ -13,13 +13,51 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, error};
+
+use super::peer_connectivity::{
+    connectivity_message, peer_monitor_loop, PeerConnectivityReport, PeerEndpoint,
+    DEFAULT_INTERVAL_SECS, DEFAULT_PROBE_TIMEOUT_SECS,
+};
 
 #[derive(Clone)]
 pub struct HealthCheckState {
     pub core_url: String,
     pub sync_status: Arc<RwLock<SyncStatus>>,
+    /// Latest peer-connectivity round.
+    ///
+    /// `None` until the first probe round finishes. Absence is *not* a failure:
+    /// nodes without configured peers, and sidecars started before the first
+    /// round, must not be reported degraded.
+    pub peer_connectivity: Arc<RwLock<Option<PeerConnectivityReport>>>,
+}
+
+impl HealthCheckState {
+    /// Build state with empty sync status and no peer data yet.
+    pub fn new(core_url: impl Into<String>) -> Self {
+        Self {
+            core_url: core_url.into(),
+            sync_status: Arc::new(RwLock::new(SyncStatus::default())),
+            peer_connectivity: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Spawn the peer probe loop for `peers`.
+    ///
+    /// Returns without spawning when there is nothing to probe, so non-validator
+    /// pods do not pay for a no-op loop.
+    pub fn spawn_peer_monitor(&self, peers: Vec<PeerEndpoint>) {
+        if peers.is_empty() {
+            debug!("no peers configured; skipping peer connectivity monitor");
+            return;
+        }
+        let interval = Duration::from_secs(DEFAULT_INTERVAL_SECS);
+        let timeout = Duration::from_secs(DEFAULT_PROBE_TIMEOUT_SECS);
+        let slot = Arc::clone(&self.peer_connectivity);
+        tokio::spawn(peer_monitor_loop(peers, interval, timeout, slot));
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -38,10 +76,29 @@ pub struct HealthResponse {
     pub network_ledger: u64,
 }
 
+/// Body of the `/peers` endpoint.
+#[derive(Serialize)]
+pub struct PeerConnectivityResponse {
+    /// `unknown` before the first round, then `ok` or `degraded`.
+    pub status: String,
+    /// Number of peers that answered.
+    pub reachable: usize,
+    /// Number of peers that did not answer.
+    pub unreachable: usize,
+    /// True only when peers are configured and all of them failed.
+    pub degraded: bool,
+    /// Actionable diagnostics for the unreachable peers.
+    pub message: String,
+    /// Per-peer address, port, outcome and last attempt time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<PeerConnectivityReport>,
+}
+
 pub fn create_router(state: HealthCheckState) -> Router {
     Router::new()
         .route("/healthz", get(liveness_handler))
         .route("/readyz", get(readiness_handler))
+        .route("/peers", get(peers_handler))
         .with_state(state)
 }
 
@@ -74,19 +131,14 @@ async fn liveness_handler(State(state): State<HealthCheckState>) -> impl IntoRes
 
 async fn readiness_handler(State(state): State<HealthCheckState>) -> impl IntoResponse {
     let sync_status = state.sync_status.read().await;
+    let peer_report = state.peer_connectivity.read().await;
+    let peers_unreachable = match peer_report.as_ref() {
+        Some(report) => report.is_fully_degraded(),
+        None => false,
+    };
 
-    if sync_status.is_synced {
-        (
-            StatusCode::OK,
-            Json(HealthResponse {
-                status: "ready".to_string(),
-                synced: true,
-                ledger_num: sync_status.ledger_num,
-                network_ledger: sync_status.network_ledger,
-            }),
-        )
-    } else {
-        (
+    if !sync_status.is_synced {
+        return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(HealthResponse {
                 status: "syncing".to_string(),
@@ -94,8 +146,70 @@ async fn readiness_handler(State(state): State<HealthCheckState>) -> impl IntoRe
                 ledger_num: sync_status.ledger_num,
                 network_ledger: sync_status.network_ledger,
             }),
-        )
+        );
     }
+
+    if peers_unreachable {
+        // Synced but partitioned: a validator with no reachable peer cannot
+        // complete SCP, so it is not actually ready to serve.
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse {
+                status: "degraded".to_string(),
+                synced: true,
+                ledger_num: sync_status.ledger_num,
+                network_ledger: sync_status.network_ledger,
+            }),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        Json(HealthResponse {
+            status: "ready".to_string(),
+            synced: true,
+            ledger_num: sync_status.ledger_num,
+            network_ledger: sync_status.network_ledger,
+        }),
+    )
+}
+
+async fn peers_handler(State(state): State<HealthCheckState>) -> impl IntoResponse {
+    let report = state.peer_connectivity.read().await;
+
+    let body = match report.as_ref() {
+        None => PeerConnectivityResponse {
+            status: "unknown".to_string(),
+            reachable: 0,
+            unreachable: 0,
+            degraded: false,
+            message: "peer connectivity probe has not completed yet".to_string(),
+            report: None,
+        },
+        Some(report) => {
+            let degraded = report.is_fully_degraded();
+            let status = match (report.peers.is_empty(), degraded) {
+                (true, _) => "unknown",
+                (false, true) => "degraded",
+                (false, false) => "ok",
+            };
+            PeerConnectivityResponse {
+                status: status.to_string(),
+                reachable: report.reachable_count(),
+                unreachable: report.unreachable_count(),
+                degraded,
+                message: connectivity_message(report),
+                report: Some(report.clone()),
+            }
+        }
+    };
+
+    let code = if body.degraded {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    };
+    (code, Json(body))
 }
 
 async fn check_core_alive(core_url: &str) -> Result<(), String> {
@@ -262,6 +376,22 @@ async fn fetch_soroban_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::controller::peer_connectivity::PeerProbeResult;
+
+    fn probe(address: &str, port: u16, reachable: bool) -> PeerProbeResult {
+        PeerProbeResult {
+            address: address.to_string(),
+            port,
+            reachable,
+            error: None,
+            last_attempt: 1_700_000_000,
+            latency_ms: Some(1),
+        }
+    }
+
+    fn ready_state() -> HealthCheckState {
+        HealthCheckState::new("http://localhost:11626")
+    }
 
     #[test]
     fn test_sync_status_default() {
@@ -279,5 +409,95 @@ mod tests {
             last_check: 0,
         };
         assert!(status.is_synced);
+    }
+
+    #[test]
+    fn new_state_has_no_peer_data() {
+        let state = ready_state();
+        assert_eq!(state.core_url, "http://localhost:11626");
+        assert!(!state.sync_status.try_read().expect("lock").is_synced);
+        assert!(state.peer_connectivity.try_read().expect("lock").is_none());
+    }
+
+    #[tokio::test]
+    async fn readiness_is_ok_when_synced_and_peer_data_absent() {
+        let state = ready_state();
+        *state.sync_status.write().await = SyncStatus {
+            is_synced: true,
+            ledger_num: 10,
+            network_ledger: 11,
+            last_check: 0,
+        };
+
+        let response = readiness_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn readiness_is_degraded_when_every_peer_is_unreachable() {
+        let state = ready_state();
+        *state.sync_status.write().await = SyncStatus {
+            is_synced: true,
+            ledger_num: 10,
+            network_ledger: 11,
+            last_check: 0,
+        };
+        *state.peer_connectivity.write().await = Some(PeerConnectivityReport {
+            peers: vec![probe("10.0.0.8", 11625, false)],
+            last_check: 1_700_000_000,
+            interval_secs: 30,
+        });
+
+        let response = readiness_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn readiness_stays_ok_when_only_some_peers_are_unreachable() {
+        let state = ready_state();
+        *state.sync_status.write().await = SyncStatus {
+            is_synced: true,
+            ledger_num: 10,
+            network_ledger: 11,
+            last_check: 0,
+        };
+        *state.peer_connectivity.write().await = Some(PeerConnectivityReport {
+            peers: vec![
+                probe("10.0.0.8", 11625, true),
+                probe("10.0.0.9", 11625, false),
+            ],
+            last_check: 1_700_000_000,
+            interval_secs: 30,
+        });
+
+        let response = readiness_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn peers_endpoint_reports_unknown_before_the_first_round() {
+        let state = ready_state();
+        let response = peers_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn peers_endpoint_reports_degraded_when_all_unreachable() {
+        let state = ready_state();
+        *state.peer_connectivity.write().await = Some(PeerConnectivityReport {
+            peers: vec![probe("10.0.0.8", 11625, false)],
+            last_check: 1_700_000_000,
+            interval_secs: 30,
+        });
+
+        let response = peers_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn spawning_a_monitor_without_peers_is_a_noop() {
+        let state = ready_state();
+        state.spawn_peer_monitor(Vec::new());
+        assert!(state.peer_connectivity.try_read().expect("lock").is_none());
     }
 }
