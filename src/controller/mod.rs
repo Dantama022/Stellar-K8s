@@ -101,6 +101,7 @@ pub mod captive_core;
 pub mod chaos_engineering;
 pub mod compliance_export;
 pub mod conditions;
+pub mod config_scope;
 pub mod cost;
 pub mod cross_cluster;
 pub mod cross_region_sync;
@@ -135,6 +136,7 @@ pub mod oci_snapshot;
 pub mod ledger_migration;
 pub mod operator_config;
 pub mod ownership_registry;
+pub mod peer_connectivity;
 pub mod peer_discovery;
 #[cfg(test)]
 mod peer_discovery_test;
@@ -178,11 +180,27 @@ pub mod zk_archive_verifier;
 
 // Issue #1577 — Ledger-Close Webhook Dispatcher
 pub mod ledger_close_dispatcher;
+// Issue #1564 — Horizon Ingestion Failover for Validator Groups
+pub mod horizon_failover;
+// Issue #1565 — Soroban RPC Caching and Pagination Limits
+pub mod soroban_rpc;
 
 pub use anomaly_detection::{run_anomaly_detection, AnomalyDetector, AnomalyEvent};
 pub use archive_health::{
-    calculate_backoff, check_archive_integrity, check_history_archive_health, ArchiveHealthResult,
-    ArchiveIntegrityResult, ARCHIVE_LAG_THRESHOLD,
+    calculate_backoff, check_archive_integrity, check_archives_version_compatibility,
+    check_history_archive_health, check_single_archive_version_compatibility,
+    supported_archive_versions, validate_archive_compatibility,
+    ArchiveHealthResult, ArchiveIntegrityResult, ArchiveVersionCompatibility,
+    StellarHistoryJson, ARCHIVE_LAG_THRESHOLD,
+};
+pub use horizon_failover::{
+    HorizonHealthStatus, HorizonIngestionCoordinator, HorizonIngestionRole,
+    DEFAULT_INGESTION_LEASE_DURATION_SECS,
+};
+pub use soroban_rpc::{
+    EventCursor, EventFilter, GetEventsRequest, GetEventsResponse, GetLedgerEntriesRequest,
+    GetLedgerEntriesResponse, LedgerEntryLruCache, LedgerEntryResult, SorobanEvent,
+    SorobanRpcHandler, DEFAULT_CACHE_SIZE_MB, DEFAULT_MAX_PAGE_SIZE,
 };
 pub use audit_log::{AdminAction, AuditEntry, AuditLog};
 pub use audit_recorder::AuditRecorder;
