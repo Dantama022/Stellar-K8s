@@ -136,6 +136,7 @@ pub mod oci_snapshot;
 pub mod ledger_migration;
 pub mod operator_config;
 pub mod ownership_registry;
+pub mod peer_connectivity;
 pub mod peer_discovery;
 #[cfg(test)]
 mod peer_discovery_test;
