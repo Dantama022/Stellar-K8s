@@ -29,14 +29,27 @@ async fn main() -> Result<()> {
 
     // Get configuration from environment
     let core_url = env::var("CORE_URL").unwrap_or_else(|_| "http://localhost:11626".to_string());
+    let core_version = env::var("CORE_VERSION").unwrap_or_else(|_| "v21.3.1".to_string());
+    let archive_urls: Vec<String> = env::var("ARCHIVE_URLS")
+        .map(|s| {
+            s.split(',')
+                .map(|u| u.trim().to_string())
+                .filter(|u| !u.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8081".to_string());
 
     info!("Core URL: {}", core_url);
+    info!("Core Version: {}", core_version);
+    info!("Archive URLs: {:?}", archive_urls);
     info!("Bind address: {}", bind_addr);
 
     // Create shared state
     let state = HealthCheckState {
         core_url: core_url.clone(),
+        core_version,
+        archive_urls,
         sync_status: Arc::new(RwLock::new(Default::default())),
     };
 

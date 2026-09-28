@@ -634,7 +634,29 @@ pub(crate) fn build_config_map(
                     "STELLAR_CORE_URL".to_string(),
                     config.stellar_core_url.clone(),
                 );
-                data.insert("INGEST".to_string(), config.enable_ingest.to_string());
+                // When ingestion leader election is active, start in non-ingesting mode until elected
+                let ingest_str = if config.enable_ingestion_leader_election || node.spec.replicas > 1 {
+                    "false".to_string()
+                } else {
+                    config.enable_ingest.to_string()
+                };
+                data.insert("INGEST".to_string(), ingest_str);
+
+                if config.enable_ingest {
+                    match crate::controller::captive_core::CaptiveCoreConfigBuilder::from_horizon_node_config(node) {
+                        Ok(builder) => match builder.build_toml() {
+                            Ok(toml) => {
+                                data.insert("captive-core.cfg".to_string(), toml);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to build Horizon Captive Core TOML: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!("Failed to create Horizon Captive Core config builder: {}", e);
+                        }
+                    }
+                }
             }
         }
         NodeType::SorobanRpc => {
@@ -2747,6 +2769,23 @@ fn build_pod_template(
             .insert("stellar.org/mtls-mode".to_string(), "strict".to_string());
     }
 
+    // Add config hash annotation for captive core hot-reload on CRD spec change
+    let config_fingerprint = format!(
+        "{:?}:{:?}:{:?}:{:?}",
+        node.spec.resources,
+        node.spec.soroban_config,
+        node.spec.horizon_config,
+        node.spec.validator_config
+    );
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(config_fingerprint.as_bytes());
+    let config_hash = hex::encode(hasher.finalize());
+    pod_object_meta
+        .annotations
+        .get_or_insert_with(BTreeMap::new)
+        .insert("stellar.org/captive-core-config-hash".to_string(), config_hash);
+
     PodTemplateSpec {
         metadata: Some(pod_object_meta),
         spec: Some(pod_spec),
@@ -3093,6 +3132,26 @@ fn build_container(node: &StellarNode, enable_mtls: bool) -> Container {
                 value: Some(ingest_workers.to_string()),
                 ..Default::default()
             });
+
+            if let Some(h_cfg) = &node.spec.horizon_config {
+                if h_cfg.enable_ingestion_leader_election || node.spec.replicas > 1 {
+                    env_vars.push(EnvVar {
+                        name: "HORIZON_INGESTION_LEADER_ELECTION".to_string(),
+                        value: Some("true".to_string()),
+                        ..Default::default()
+                    });
+                    env_vars.push(EnvVar {
+                        name: "HORIZON_INGESTION_LEASE_NAME".to_string(),
+                        value: Some(format!("{}-horizon-ingest-lease", node.metadata.name.as_deref().unwrap_or("horizon"))),
+                        ..Default::default()
+                    });
+                    env_vars.push(EnvVar {
+                        name: "HORIZON_INGESTION_LEASE_DURATION_SECONDS".to_string(),
+                        value: Some(h_cfg.ingestion_lease_duration_seconds.unwrap_or(15).to_string()),
+                        ..Default::default()
+                    });
+                }
+            }
         }
         NodeType::SorobanRpc => {
             env_vars.push(EnvVar {
@@ -3105,6 +3164,18 @@ fn build_container(node: &StellarNode, enable_mtls: bool) -> Container {
                 value: Some((worker_threads / 2).max(1).to_string()),
                 ..Default::default()
             });
+            if let Some(s_cfg) = &node.spec.soroban_config {
+                env_vars.push(EnvVar {
+                    name: "SOROBAN_RPC_MAX_PAGE_SIZE".to_string(),
+                    value: Some(s_cfg.effective_max_page_size().to_string()),
+                    ..Default::default()
+                });
+                env_vars.push(EnvVar {
+                    name: "SOROBAN_RPC_CACHE_SIZE_MB".to_string(),
+                    value: Some(s_cfg.effective_cache_size_mb().to_string()),
+                    ..Default::default()
+                });
+            }
         }
     }
 
