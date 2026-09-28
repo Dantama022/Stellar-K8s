@@ -16,6 +16,8 @@ description: A Helm chart for the Stellar-K8s Kubernetes Operator
 type: application
 version: 3.0.0
 appVersion: "3.0.0"
+version: 2.10.0
+appVersion: "2.10.0"
 keywords:
   - stellar
   - kubernetes
