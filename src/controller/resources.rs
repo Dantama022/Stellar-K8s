@@ -588,14 +588,18 @@ pub(crate) fn build_config_map(
 
     match &node.spec.node_type {
         NodeType::Validator => {
-            let mut core_cfg = String::new();
-            if let Some(config) = &node.spec.validator_config {
-                if let Some(qs) = quorum_override {
-                    core_cfg.push_str(&qs.to_stellar_core_toml());
-                } else if let Some(q) = &config.quorum_set {
-                    core_cfg.push_str(q);
-                }
-            }
+            // User-supplied config is collected first but rendered *after* the
+            // operator header: a bare key that follows a `[[TABLE]]` header is
+            // scoped into that table by TOML, so appending operator keys to
+            // user content would silently disable mTLS, catch-up mode and
+            // KNOWN_PEERS. See controller::config_scope.
+            let user_cfg: String = match (&node.spec.validator_config, quorum_override) {
+                (Some(_), Some(qs)) => qs.to_stellar_core_toml(),
+                (Some(config), None) => config.quorum_set.clone().unwrap_or_default(),
+                _ => String::new(),
+            };
+
+            let mut header = crate::controller::config_scope::OperatorHeader::default();
 
             if enable_mtls {
                 // NOTE: these keys are written best-effort and have not been verified
@@ -606,25 +610,30 @@ pub(crate) fn build_config_map(
                 // correctly issued and mounted at /etc/stellar/tls regardless. See the
                 // "Known Limitation" section in docs/mtls-guide.md and
                 // docs/security/e2e-encryption-architecture.md.
-                core_cfg.push_str("\n# mTLS Configuration (best-effort; see docs/mtls-guide.md)\n");
-                core_cfg.push_str("HTTP_PORT_SECURE=true\n");
-                core_cfg.push_str("TLS_CERT_FILE=\"/etc/stellar/tls/tls.crt\"\n");
-                core_cfg.push_str("TLS_KEY_FILE=\"/etc/stellar/tls/tls.key\"\n");
+                header.comment("mTLS Configuration (best-effort; see docs/mtls-guide.md)");
+                header.key_value("HTTP_PORT_SECURE", "true");
+                header.key_value("TLS_CERT_FILE", "\"/etc/stellar/tls/tls.crt\"");
+                header.key_value("TLS_KEY_FILE", "\"/etc/stellar/tls/tls.key\"");
             }
 
             match node.spec.history_mode {
                 HistoryMode::Full => {
-                    core_cfg.push_str("\n# Full History Mode\n");
-                    core_cfg.push_str("CATCHUP_COMPLETE=true\n");
+                    header.comment("Full History Mode");
+                    header.key_value("CATCHUP_COMPLETE", "true");
                 }
                 HistoryMode::Recent => {
-                    core_cfg.push_str("\n# Recent History Mode\n");
-                    core_cfg.push_str("CATCHUP_COMPLETE=false\n");
-                    core_cfg.push_str("CATCHUP_RECENT=60480\n");
+                    header.comment("Recent History Mode");
+                    header.key_value("CATCHUP_COMPLETE", "false");
+                    header.key_value("CATCHUP_RECENT", "60480");
                 }
             }
 
-            if !core_cfg.is_empty() {
+            if !header.is_empty() || !user_cfg.trim().is_empty() {
+                let core_cfg = crate::controller::config_scope::assemble_config(&header, &user_cfg);
+                crate::controller::config_scope::log_config_scope_findings(
+                    node.name_any().as_str(),
+                    &core_cfg,
+                );
                 data.insert("stellar-core.cfg".to_string(), core_cfg);
             }
         }
@@ -1937,6 +1946,24 @@ pub async fn delete_ingress(client: &Client, node: &StellarNode, dry_run: bool) 
 // Pod Template Builder
 // ============================================================================
 
+/// Render the peers a node is expected to reach as a `KNOWN_PEERS` TOML array,
+/// for the health sidecar to probe (#1561).
+///
+/// The list is produced by the same function the reconciler uses for the
+/// `PeerConnectivity` condition, so the pod-local probe and the cluster-level
+/// condition can never disagree about which peers are in play. Entries are
+/// emitted with `{:?}` so they are TOML basic strings, which keeps IPv6
+/// literals and any other host spelling valid.
+fn known_peers_env_value(node: &StellarNode) -> String {
+    let peers = crate::controller::peer_connectivity::known_peers_for_node(node);
+    let rendered = peers
+        .iter()
+        .map(|peer| format!("{:?}", peer.to_peer_string()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("KNOWN_PEERS=[{rendered}]")
+}
+
 /// Build the pod template.
 ///
 /// `seed_injection` is `Some` only for Validator StatefulSets; it adds the
@@ -2381,6 +2408,32 @@ fn build_pod_template(
     // ==========================================================================
     // Inject health check sidecar for advanced liveness/readiness probes
     // ==========================================================================
+    let mut sidecar_env = vec![
+        EnvVar {
+            name: "CORE_URL".to_string(),
+            value: Some(match node.spec.node_type {
+                NodeType::Validator => "http://localhost:11626".to_string(),
+                NodeType::Horizon => "http://localhost:8000".to_string(),
+                NodeType::SorobanRpc => "http://localhost:8000".to_string(),
+            }),
+            ..Default::default()
+        },
+        EnvVar {
+            name: "RUST_LOG".to_string(),
+            value: Some("info".to_string()),
+            ..Default::default()
+        },
+    ];
+
+    // Only validators have overlay peers, so only they get a peer list to probe.
+    if node.spec.node_type == NodeType::Validator {
+        sidecar_env.push(EnvVar {
+            name: "KNOWN_PEERS".to_string(),
+            value: Some(known_peers_env_value(node)),
+            ..Default::default()
+        });
+    }
+
     let health_check_sidecar = k8s_openapi::api::core::v1::Container {
         name: "stellar-health-check".to_string(),
         image: Some(
@@ -2396,22 +2449,7 @@ fn build_pod_template(
             protocol: Some("TCP".to_string()),
             ..Default::default()
         }]),
-        env: Some(vec![
-            EnvVar {
-                name: "CORE_URL".to_string(),
-                value: Some(match node.spec.node_type {
-                    NodeType::Validator => "http://localhost:11626".to_string(),
-                    NodeType::Horizon => "http://localhost:8000".to_string(),
-                    NodeType::SorobanRpc => "http://localhost:8000".to_string(),
-                }),
-                ..Default::default()
-            },
-            EnvVar {
-                name: "RUST_LOG".to_string(),
-                value: Some("info".to_string()),
-                ..Default::default()
-            },
-        ]),
+        env: Some(sidecar_env),
         security_context: Some(SecurityContext {
             allow_privilege_escalation: Some(false),
             capabilities: Some(Capabilities {

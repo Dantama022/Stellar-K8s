@@ -102,7 +102,6 @@ pub mod compliance_report;
 pub mod incident;
 pub mod multisig_operation;
 pub mod validator_score;
-pub mod service_ownership;
 pub mod stellar_registry;
 pub mod stellar_security;
 

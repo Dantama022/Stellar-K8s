@@ -101,6 +101,7 @@ pub mod captive_core;
 pub mod chaos_engineering;
 pub mod compliance_export;
 pub mod conditions;
+pub mod config_scope;
 pub mod cost;
 pub mod cross_cluster;
 pub mod cross_region_sync;
@@ -135,6 +136,7 @@ pub mod oci_snapshot;
 pub mod ledger_migration;
 pub mod operator_config;
 pub mod ownership_registry;
+pub mod peer_connectivity;
 pub mod peer_discovery;
 #[cfg(test)]
 mod peer_discovery_test;
