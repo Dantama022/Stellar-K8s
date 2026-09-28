@@ -4,7 +4,7 @@ ARG SOURCE_DATE_EPOCH=0
 # Stage 1: Chef - Dependency Caching Layer
 # (linux/amd64 only)
 # ==============================================================================
-FROM lukemathwalker/cargo-chef:latest-rust-1.95-slim-bookworm AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.98-slim-bookworm AS chef
 WORKDIR /app
 
 # ==============================================================================
@@ -45,22 +45,28 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --bin stellar-operator \
     --bin kubectl-stellar \
     --bin stellar-sidecar \
+    --bin stellar-hooks \
     --bin stellar-watcher \
     --bin stellar-fork-detector \
-    --bin stellar-health-sidecar && \
+    --bin stellar-health-sidecar \
+    --bin stellar-cert-health && \
   mkdir -p /app/bin && \
   cp /app/target/release/stellar-operator /app/bin/ && \
   cp /app/target/release/kubectl-stellar /app/bin/ && \
   cp /app/target/release/stellar-sidecar /app/bin/ && \
+  cp /app/target/release/stellar-hooks /app/bin/ && \
   cp /app/target/release/stellar-watcher /app/bin/ && \
   cp /app/target/release/stellar-fork-detector /app/bin/ && \
   cp /app/target/release/stellar-health-sidecar /app/bin/ && \
+  cp /app/target/release/stellar-cert-health /app/bin/ && \
   strip /app/bin/stellar-operator \
     /app/bin/kubectl-stellar \
     /app/bin/stellar-sidecar \
+    /app/bin/stellar-hooks \
     /app/bin/stellar-watcher \
     /app/bin/stellar-fork-detector \
-    /app/bin/stellar-health-sidecar
+    /app/bin/stellar-health-sidecar \
+    /app/bin/stellar-cert-health
 
 # ==============================================================================
 # Stage 4: Local Binaries - Fast local packaging from host build artifacts
@@ -74,7 +80,6 @@ COPY target/release/kubectl-stellar /kubectl-stellar
 
 # ==============================================================================
 # Stage 5: Runtime Base - Shared runtime dependencies for all runtime images
-# Stage 4: Runtime Base - Shared runtime dependencies for all runtime images
 #
 # Consolidates the apt-get install, user creation, labels, exposed ports, and
 # health-check declaration that are identical between the local-dev and CI
@@ -115,7 +120,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Stage 6: Runtime Local - Minimal image for local dev (no container recompile)
 # DEV-ONLY: Final target for `make docker-build`. Copies pre-built binaries
 # from Stage 4 (local-binaries). NOT used in CI.
-# Stage 5: Runtime Local - Minimal image for local dev (no container recompile)
 # ==============================================================================
 FROM runtime-base AS runtime-local
 
@@ -126,7 +130,7 @@ COPY target/release/kubectl-stellar /kubectl-stellar
 ENTRYPOINT ["/stellar-operator"]
 
 # ==============================================================================
-# Stage 6: Runtime - Minimal image with all binaries (~15-20MB total)
+# Stage 7: Runtime - Minimal image with all binaries (~15-20MB total)
 # ==============================================================================
 FROM runtime-base AS runtime
 
@@ -134,8 +138,10 @@ FROM runtime-base AS runtime
 COPY --from=builder /app/bin/stellar-operator /stellar-operator
 COPY --from=builder /app/bin/kubectl-stellar /kubectl-stellar
 COPY --from=builder /app/bin/stellar-sidecar /stellar-sidecar
+COPY --from=builder /app/bin/stellar-hooks /stellar-hooks
 COPY --from=builder /app/bin/stellar-watcher /stellar-watcher
 COPY --from=builder /app/bin/stellar-fork-detector /stellar-fork-detector
 COPY --from=builder /app/bin/stellar-health-sidecar /stellar-health-sidecar
+COPY --from=builder /app/bin/stellar-cert-health /stellar-cert-health
 
 ENTRYPOINT ["/stellar-operator"]

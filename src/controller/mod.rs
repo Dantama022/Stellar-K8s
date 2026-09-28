@@ -1,3 +1,15 @@
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //! Controller module for StellarNode reconciliation
 //!
 //! This module contains the main controller loop, reconciliation logic,
@@ -18,7 +30,8 @@
 //! - **Disaster Recovery**: Backup and restore automation
 //! - **Service Mesh Integration**: Istio and Linkerd support
 //! - **CVE Patching**: Automatic security updates
-//! - **Blue/Green Deployments**: Zero-downtime RPC node updates
+//! - **Blue/Green Deployments**: Horizon/RPC Deployment color switching
+//! - **Core Blue/Green**: Validator StatefulSet sync-gated cutover (`blue_green_core`)
 //! - **Metrics**: Prometheus metrics for observability
 //!
 //! # Key Types
@@ -50,6 +63,7 @@
 
 pub mod benchmark;
 pub mod blue_green;
+pub mod blue_green_core;
 pub mod cache_aware_queue;
 pub mod canary;
 pub mod cross_cloud_failover;
@@ -69,6 +83,7 @@ pub mod predictive_scaling;
 pub mod pss;
 pub mod quota;
 pub mod registry_controller;
+pub mod registry_gate;
 pub mod resource_meta;
 pub mod retry_policy_tuner;
 pub mod snapshot_integrity;
@@ -109,20 +124,27 @@ pub(crate) mod health;
 #[cfg(test)]
 mod health_test;
 pub mod kms_secret;
+pub mod lifecycle_hooks;
 #[cfg(feature = "metrics")]
 pub mod metrics;
+#[cfg(feature = "metrics")]
+pub mod asset_monitor;
 pub mod mtls;
 pub mod mtls_rotation;
 pub mod oci_snapshot;
+pub mod ledger_migration;
 pub mod operator_config;
+pub mod ownership_registry;
 pub mod peer_discovery;
 #[cfg(test)]
 mod peer_discovery_test;
 pub mod performance;
+pub mod phases;
 pub mod pruning_reconciler;
 pub mod pruning_worker;
 pub mod quorum;
 pub mod read_pool;
+pub mod testnet_compliance;
 pub(crate) mod reconciler;
 #[cfg(test)]
 mod reconciler_test;
@@ -143,6 +165,7 @@ pub mod state_sync;
 pub mod storage_migration;
 pub(crate) mod sync_scale;
 pub(crate) mod sync_state_monitor;
+pub mod tenant_reconciler;
 pub mod topology;
 pub mod traffic;
 #[cfg(test)]
@@ -152,6 +175,9 @@ pub mod vpa;
 pub(crate) mod vsl;
 pub mod webhook_delivery;
 pub mod zk_archive_verifier;
+
+// Issue #1577 — Ledger-Close Webhook Dispatcher
+pub mod ledger_close_dispatcher;
 
 pub use anomaly_detection::{run_anomaly_detection, AnomalyDetector, AnomalyEvent};
 pub use archive_health::{
@@ -165,6 +191,12 @@ pub use benchmark::run_benchmark_controller;
 pub use blue_green::{
     cleanup_blue_deployment, create_green_deployment, rollback_to_blue, run_smoke_tests,
     switch_traffic_to_green, wait_for_green_ready, BlueGreenConfig, BlueGreenStatus,
+};
+pub use blue_green_core::{
+    evaluate_cutover_gate, may_switch_service_to_green, plan_cutover_advance,
+    plan_rollback_advance, reconcile_validator_blue_green, should_take_over_validator_workload,
+    storage_identities, CoreBlueGreenPhase, CutoverCommand, CutoverGateResult, CutoverStep,
+    RollbackCommand, RollbackStep, COLOR_BLUE, COLOR_GREEN, COLOR_LABEL,
 };
 pub use cache_aware_queue::{
     calculate_cache_aware_backoff, priority_from_signals, CacheAwareBackoffInput,
@@ -230,7 +262,9 @@ pub use snapshot_worker::run_snapshot_worker;
 pub use webhook_delivery::{
     DeliveryRecord, WebhookDeliveryService, WebhookEndpoint, WebhookEvent, WebhookEventType,
 };
+pub mod cross_signal_anomaly;
 pub mod health_check_sidecar;
+pub mod index_sharding;
 pub mod ml_pipeline;
 pub mod observability_dashboard;
 pub mod observability_pipeline;
@@ -238,4 +272,8 @@ pub mod orphan_audit;
 pub mod pvc_autoscaler;
 pub mod resource_optimization;
 
+// Issue #1577 — Ledger-Close Webhook Dispatcher exports
+pub use ledger_close_dispatcher::{
+    run_ledger_close_poll_loop, LedgerCloseDispatcher,
+};
 pub use orphan_audit::{OrphanAuditReport, OrphanAuditor, OrphanedResource};

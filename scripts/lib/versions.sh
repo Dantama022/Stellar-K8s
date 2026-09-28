@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
+# Copyright 2024 Stellar-K8s Contributors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # scripts/lib/versions.sh — single source of truth for pinned toolchain
 # minimum versions.
 #
-# Sourced by scripts/preflight.sh, scripts/setup-linux.sh, and
-# scripts/setup-mac.sh so the three never drift out of sync. Previously each
-# of the setup scripts hardcoded its own copy of these values with a
-# "keep in sync" comment and nothing actually enforcing it — bump the
-# version here once and every consumer picks it up automatically.
+# Sourced by scripts/preflight.sh so version pins stay in one place.
+# Bump the version here once and every consumer picks it up automatically.
 #
 # Usage:
 #   source "${SCRIPT_DIR}/lib/versions.sh"

@@ -1,8 +1,10 @@
 # Local Development with k3d
 
-<!-- chart-sync: 2026-07-27T23:45Z Dockerfile cargo-chef latest-rust-1.95-slim-bookworm -->
+<!-- chart-sync: 2026-07-30T04:00Z Dockerfile cargo-chef latest-rust-1.95-slim-bookworm -->
 
 This guide walks you through setting up a fully functional Stellar development environment on your local machine using [k3d](https://k3d.io) — K3s running inside Docker. No cloud account required.
+
+For repository scratch cleanup and contributor gates, see root [`DEVELOPMENT.md`](../DEVELOPMENT.md) (`make cleanup`, `make health`) and [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ---
 
@@ -25,6 +27,12 @@ k3d version
 kubectl version --client
 helm version
 ```
+
+Once the toolchain is installed, the repository's own Makefile gates give
+fast feedback: `make quick` runs the formatting check and compiles the
+workspace, while `make ci-local` runs the full local CI suite (fmt, lint,
+docs, audit, tests, build, link-check). Run `make help` for an overview of
+every target.
 
 > **Docker resource requirements**: Stellar nodes are memory and I/O intensive. Before creating the cluster, ensure Docker has sufficient resources allocated. On Docker Desktop (Mac/Windows), go to **Settings → Resources** and set at minimum:
 > - **CPUs**: 4

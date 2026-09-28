@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
+# Copyright 2024 Stellar-K8s Contributors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # Generates a periodic dead-code and unused-config report (issue #1064).
 #
 # The report is informational: it always exits 0 and writes a Markdown
 # summary to target/reports/dead-code-report.md so CI can upload it as an
 # artifact. Set SKIP_CARGO=1 to skip the compiler pass (used for smoke tests).
+# shell-safety: disable-file SH001 -- this report must survive a failing cargo pass
+# and always exit 0, so `-e` is deliberately omitted from strict mode.
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

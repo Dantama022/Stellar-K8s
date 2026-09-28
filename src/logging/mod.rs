@@ -1,3 +1,15 @@
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //! Structured Logging and Analytics Module
 //!
 //! This module provides a consistent schema for structured logs, intelligent
@@ -64,6 +76,9 @@ pub struct StructuredLog {
     /// Controller reconcile ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reconcile_id: Option<String>,
+    /// Request correlation ID across service boundaries
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
     /// Arbitrary additional context
     #[serde(flatten)]
     pub extras: HashMap<String, serde_json::Value>,
@@ -141,13 +156,18 @@ pub fn build_structured_log(event: &Event<'_>) -> StructuredLog {
         module: metadata.module_path().map(|s| s.to_string()),
         file: metadata.file().map(|s| s.to_string()),
         line: metadata.line(),
-        trace_id: None, // Injected by OtelTraceIdLayer
-        span_id: None,
+        trace_id: crate::telemetry::current_trace_context().map(|(tid, _)| tid),
+        span_id: crate::telemetry::current_trace_context().map(|(_, sid)| sid),
         k8s_node: std::env::var("K8S_NODE_NAME").ok(),
         k8s_namespace: std::env::var("K8S_NAMESPACE").ok(),
         reconcile_id: visitor
             .extras
             .get("reconcile_id")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        correlation_id: visitor
+            .extras
+            .get("correlation_id")
+            .or_else(|| visitor.extras.get("x_correlation_id"))
             .and_then(|v| v.as_str().map(|s| s.to_string())),
         extras: visitor.extras,
     }
@@ -237,6 +257,7 @@ mod tests {
             k8s_node: Some("node-1".to_string()),
             k8s_namespace: Some("default".to_string()),
             reconcile_id: Some("rec-123".to_string()),
+            correlation_id: Some("corr-456".to_string()),
             extras,
         };
 
@@ -270,6 +291,7 @@ mod tests {
             k8s_node: None,
             k8s_namespace: None,
             reconcile_id: None,
+            correlation_id: None,
             extras,
         };
 

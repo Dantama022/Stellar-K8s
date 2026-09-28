@@ -163,8 +163,6 @@ No changes required to CI workflows. The targets actually invoked from
 - `make lint-strict`
 - `make check-third-party-licenses`
 - `make check-api-docs`
-- `make check-stale-docs`
-- `make update-doc-baseline`
 - `make crd-gen`
 - `make helm-lint`
 - `make test`

@@ -1,3 +1,15 @@
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 // tests/concurrent_reconciliation_test.rs
 //
 // Concurrency test harness for StellarNode reconciler.
@@ -29,7 +41,12 @@ impl MockReconciler {
 
     /// Simulates the reconcile entrypoint. Returns Ok(true) if succeeded,
     /// Err(conflict) if resource version mismatch occurred.
-    fn reconcile(&self, node_name: &str, resource_version: u32, target_version: u32) -> Result<bool, &'static str> {
+    fn reconcile(
+        &self,
+        node_name: &str,
+        resource_version: u32,
+        target_version: u32,
+    ) -> Result<bool, &'static str> {
         if !self.is_leader.load(Ordering::Relaxed) {
             return Ok(false); // Standby skips reconciliation
         }
@@ -82,28 +99,33 @@ fn test_concurrent_reconcile_same_node_is_locked() {
     let node = "stellar-node-validator-1";
 
     // Start first reconciliation in parallel
-    let handle1 = thread::spawn(move || {
-        reconciler_clone.reconcile(node, 1, 1)
-    });
+    let handle1 = thread::spawn(move || reconciler_clone.reconcile(node, 1, 1));
 
     // Wait slightly to guarantee handle1 acquires the lock
     thread::sleep(Duration::from_millis(10));
 
     // Try to run second reconciliation for the same node concurrently
     let reconciler_clone2 = reconciler.clone();
-    let handle2 = thread::spawn(move || {
-        reconciler_clone2.reconcile(node, 1, 1)
-    });
+    let handle2 = thread::spawn(move || reconciler_clone2.reconcile(node, 1, 1));
 
     let res1 = handle1.join().unwrap();
     let res2 = handle2.join().unwrap();
 
     // One of them must have succeeded, and the other must have failed with ConcurrencyConflict
-    let success_count = vec![&res1, &res2].iter().filter(|r| r.is_ok()).count();
-    let conflict_count = vec![&res1, &res2].iter().filter(|r| matches!(r, Err("ConcurrencyConflict"))).count();
+    let success_count = [&res1, &res2].iter().filter(|r| r.is_ok()).count();
+    let conflict_count = [&res1, &res2]
+        .iter()
+        .filter(|r| matches!(r, Err("ConcurrencyConflict")))
+        .count();
 
-    assert_eq!(success_count, 1, "Exactly one reconciliation should succeed");
-    assert_eq!(conflict_count, 1, "The concurrent reconciliation should be rejected with a conflict");
+    assert_eq!(
+        success_count, 1,
+        "Exactly one reconciliation should succeed"
+    );
+    assert_eq!(
+        conflict_count, 1,
+        "The concurrent reconciliation should be rejected with a conflict"
+    );
     assert_eq!(reconciler.reconciled_count.load(Ordering::SeqCst), 1);
 }
 
@@ -111,7 +133,7 @@ fn test_concurrent_reconcile_same_node_is_locked() {
 #[test]
 fn test_concurrent_reconcile_different_nodes_run_in_parallel() {
     let reconciler = MockReconciler::new();
-    
+
     let node1 = "stellar-node-1";
     let node2 = "stellar-node-2";
     let node3 = "stellar-node-3";
@@ -131,7 +153,11 @@ fn test_concurrent_reconcile_different_nodes_run_in_parallel() {
     assert!(res1.is_ok());
     assert!(res2.is_ok());
     assert!(res3.is_ok());
-    assert_eq!(reconciler.reconciled_count.load(Ordering::SeqCst), 3, "All distinct nodes should reconcile in parallel");
+    assert_eq!(
+        reconciler.reconciled_count.load(Ordering::SeqCst),
+        3,
+        "All distinct nodes should reconcile in parallel"
+    );
 }
 
 /// Test Optimistic Concurrency Control (OCC) / 409 Conflict resolution.
@@ -139,10 +165,10 @@ fn test_concurrent_reconcile_different_nodes_run_in_parallel() {
 #[test]
 fn test_optimistic_concurrency_conflict_detected() {
     let reconciler = MockReconciler::new();
-    
+
     // Simulate updating an outdated node version (1) to target version (2)
     let res = reconciler.reconcile("stellar-node", 1, 2);
-    
+
     assert!(res.is_err());
     assert_eq!(res.err(), Some("Conflict409VersionMismatch"));
     assert_eq!(reconciler.conflicts_detected.load(Ordering::SeqCst), 1);
@@ -159,9 +185,7 @@ fn test_non_leader_skips_concurrent_reconciliation() {
     for i in 0..5 {
         let rec = reconciler.clone();
         let node_name = format!("stellar-node-{}", i);
-        handles.push(thread::spawn(move || {
-            rec.reconcile(&node_name, 1, 1)
-        }));
+        handles.push(thread::spawn(move || rec.reconcile(&node_name, 1, 1)));
     }
 
     for handle in handles {

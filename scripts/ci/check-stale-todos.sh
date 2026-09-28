@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# Copyright 2024 Stellar-K8s Contributors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 set -euo pipefail
 
 echo "========================================"
@@ -13,24 +25,19 @@ CRITICAL_PATHS=(
   "src/"
 )
 
+# Paths that document the TODO policy itself (or generate issues) and would
+# otherwise self-match on the words TODO/FIXME.
+EXCLUDE_REGEX='(^scripts/ci/check-stale-todos\.sh$)'
+
 ERRORS=0
 
 echo "Scanning critical paths: ${CRITICAL_PATHS[*]}"
-
-# Find all files in critical paths, ignoring binary and known large directories if any
-# We use grep with line numbers and file names
-# The regex matches TODO or FIXME without a valid scope.
-# Valid scopes: TODO(issue-number), TODO(@username), TODO(exempt: reason)
-# Invalid: TODO:, TODO, FIXME
 
 for dir in "${CRITICAL_PATHS[@]}"; do
   if [ ! -d "$dir" ]; then
     continue
   fi
 
-  # grep -rn 'TODO\|FIXME' "$dir" 
-  # We look for lines with TODO or FIXME, then use a regex in awk/sed or bash to validate them.
-  
   while IFS= read -r match; do
     if [ -z "$match" ]; then continue; fi
     # match format: file:line:content
@@ -38,38 +45,29 @@ for dir in "${CRITICAL_PATHS[@]}"; do
     line=$(echo "$match" | cut -d':' -f2)
     content=$(echo "$match" | cut -d':' -f3-)
 
-    # If the content matches TODO( or FIXME( with valid inner text, it's fine.
-    # Otherwise, it's stale.
-    # Valid pattern example: TODO([#0-9]+|@[a-zA-Z0-9_-]+|exempt:.*)
-    
-    # We strip out valid ones and see if TODO/FIXME still exists in an invalid form
-    # We can just extract all TODO/FIXMEs from the line and check each.
-    
-    # Use grep -q to check if the line contains a valid marker. If it does, we assume it's valid?
-    # Better: check if it contains ANY invalid markers.
-    invalid_found=false
-    
-    # We check if it matches the valid formats.
-    # To be strictly safe and portable, we can just use python or perl.
-    # Or simply: if it doesn't match the valid pattern, it's invalid.
-    if ! echo "$content" | grep -E -q '\b(TODO|FIXME)\((#[0-9]+|@[a-zA-Z0-9_-]+|exempt:[^)]+)\)'; then
-      invalid_found=true
+    if echo "$file" | grep -E -q "$EXCLUDE_REGEX"; then
+      continue
     fi
-    
-    if [ "$invalid_found" = true ]; then
+
+    # Valid scopes: TODO(#123), TODO(@user), TODO(exempt: reason)
+    if ! echo "$content" | grep -E -q '\b(TODO|FIXME)\((#[0-9]+|@[a-zA-Z0-9_-]+|exempt:[^)]+)\)'; then
       echo "::error file=$file,line=$line::Stale or improperly formatted TODO/FIXME found. Use TODO(#[issue]), TODO(@[username]), or TODO(exempt: [reason])."
       echo "  Line: $content"
       ERRORS=$((ERRORS + 1))
     fi
 
-  done < <(grep -rnE '\b(TODO|FIXME)\b' "$dir" || true)
+  done < <(grep -rnE '\b(TODO|FIXME)\b' "$dir" \
+             --exclude='check-stale-todos.sh' \
+             --exclude-dir='.git' \
+             --exclude-dir='archive' \
+             || true)
 
 done
 
 if [ "$ERRORS" -gt 0 ]; then
-  echo "❌ Found $ERRORS stale TODO/FIXME references."
+  echo "Found $ERRORS stale TODO/FIXME references."
   exit 1
 fi
 
-echo "✅ All TODO/FIXME references in critical paths are properly documented."
+echo "All TODO/FIXME references in critical paths are properly documented."
 exit 0

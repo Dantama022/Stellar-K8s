@@ -1,4 +1,15 @@
-
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //! Command-level smoke tests for documented CLI example commands.
 //!
 //! This test validates that all CLI examples from `docs/cli-commands-reference.md`
@@ -21,24 +32,33 @@ fn run_examples_parse() {
     // From docs/cli-commands-reference.md - "Development" section
     let examples = vec![
         vec!["stellar-operator", "run", "--namespace", "stellar-system"],
-        vec!["stellar-operator", "run", "--enable-mtls", "--namespace", "stellar-system"],
+        vec![
+            "stellar-operator",
+            "run",
+            "--enable-mtls",
+            "--namespace",
+            "stellar-system",
+        ],
         vec!["stellar-operator", "run", "--dry-run"],
     ];
 
     for example in examples {
         let parsed = parse_command(&example).unwrap_or_else(|e| {
-            panic!("Failed to parse documented example: {:?}\nError: {}", example, e);
+            panic!(
+                "Failed to parse documented example: {:?}\nError: {}",
+                example, e
+            );
         });
         if let Commands::Run(args) = parsed.command {
             println!("✓ Parsed: {:?}", example);
             // Validate args are sensible defaults
             match example.as_slice() {
                 ["stellar-operator", "run", "--namespace", ns] => {
-                    assert_eq!(args.namespace, ns);
+                    assert_eq!(args.namespace, *ns);
                 }
                 ["stellar-operator", "run", "--enable-mtls", "--namespace", ns] => {
                     assert!(args.enable_mtls);
-                    assert_eq!(args.namespace, ns);
+                    assert_eq!(args.namespace, *ns);
                 }
                 ["stellar-operator", "run", "--dry-run"] => {
                     assert!(args.dry_run);
@@ -127,7 +147,7 @@ fn incident_report_example_parses() {
     ];
     let parsed = parse_command(&example).unwrap();
     if let Commands::Incident { command } = parsed.command {
-        if let stellar_k8s::cli::incident::IncidentCommands::Report(_) = command {
+        if let stellar_k8s::incident::IncidentCommands::Report(_) = command {
             println!("✓ Incident report example parses correctly");
         } else {
             panic!("Expected Report subcommand");
@@ -210,7 +230,12 @@ fn install_completion_examples_parse() {
 
 #[test]
 fn benchmark_examples_parse() {
-    let example = vec!["stellar-operator", "benchmark", "--namespace", "stellar-system"];
+    let example = vec![
+        "stellar-operator",
+        "benchmark",
+        "--namespace",
+        "stellar-system",
+    ];
     let parsed = parse_command(&example).unwrap();
     if let Commands::Benchmark(args) = parsed.command {
         assert_eq!(args.namespace, "stellar-system");
@@ -246,18 +271,15 @@ fn prune_archive_example_parses() {
     let example = vec![
         "stellar-operator",
         "prune-archive",
-        "--namespace",
-        "stellar-system",
-        "--node-name",
-        "validator-1",
-        "--keep-checkpoints",
+        "--archive-url",
+        "s3://stellar-history-prod/archive",
+        "--min-checkpoints",
         "100",
     ];
     let parsed = parse_command(&example).unwrap();
     if let Commands::PruneArchive(args) = parsed.command {
-        assert_eq!(args.namespace, "stellar-system");
-        assert_eq!(args.node_name, Some("validator-1".to_string()));
-        assert_eq!(args.keep_checkpoints, 100);
+        assert_eq!(args.archive_url, "s3://stellar-history-prod/archive");
+        assert_eq!(args.min_checkpoints, 100);
         println!("✓ Prune-archive example parses correctly");
     } else {
         panic!("Expected PruneArchive subcommand");
@@ -271,13 +293,13 @@ fn diff_example_parses() {
         "diff",
         "--namespace",
         "stellar-system",
-        "--node-name",
+        "--name",
         "validator-1",
     ];
     let parsed = parse_command(&example).unwrap();
     if let Commands::Diff(args) = parsed.command {
         assert_eq!(args.namespace, "stellar-system");
-        assert_eq!(args.node_name, Some("validator-1".to_string()));
+        assert_eq!(args.name, "validator-1");
         println!("✓ Diff example parses correctly");
     } else {
         panic!("Expected Diff subcommand");

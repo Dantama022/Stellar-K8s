@@ -1,3 +1,15 @@
+// Copyright 2024 Stellar-K8s Contributors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //! Kubernetes resource builders for StellarNode
 //!
 //! This module creates and manages the underlying Kubernetes resources
@@ -586,7 +598,15 @@ pub(crate) fn build_config_map(
             }
 
             if enable_mtls {
-                core_cfg.push_str("\n# mTLS Configuration\n");
+                // NOTE: these keys are written best-effort and have not been verified
+                // against a real stellar-core build; stellar-core's admin/HTTP endpoint
+                // does not have documented native HTTPS termination in upstream
+                // releases as of this writing, so this may be a no-op depending on the
+                // stellar-core version in use. The client certificate material is still
+                // correctly issued and mounted at /etc/stellar/tls regardless. See the
+                // "Known Limitation" section in docs/mtls-guide.md and
+                // docs/security/e2e-encryption-architecture.md.
+                core_cfg.push_str("\n# mTLS Configuration (best-effort; see docs/mtls-guide.md)\n");
                 core_cfg.push_str("HTTP_PORT_SECURE=true\n");
                 core_cfg.push_str("TLS_CERT_FILE=\"/etc/stellar/tls/tls.crt\"\n");
                 core_cfg.push_str("TLS_KEY_FILE=\"/etc/stellar/tls/tls.key\"\n");
@@ -823,7 +843,7 @@ pub async fn ensure_canary_deployment(
     Ok(())
 }
 
-fn build_deployment(node: &StellarNode, enable_mtls: bool) -> Deployment {
+pub(crate) fn build_deployment(node: &StellarNode, enable_mtls: bool) -> Deployment {
     let mut labels = standard_labels(node);
     let name = node.name_any();
 
@@ -1078,10 +1098,34 @@ pub async fn ensure_canary_service(
     Ok(())
 }
 
-fn build_service(node: &StellarNode, enable_mtls: bool) -> Service {
+pub(crate) fn build_service(node: &StellarNode, _enable_mtls: bool) -> Service {
     let mut labels = standard_labels(node);
     merge_service_metadata_labels(&mut labels, node);
     let name = node.name_any();
+
+    // Validator blue/green: Service must select only the active publishing color.
+    let mut selector = labels.clone();
+    if node.spec.node_type == NodeType::Validator
+        && node.spec.strategy.strategy_type == RolloutStrategyType::BlueGreen
+    {
+        let active = node
+            .status
+            .as_ref()
+            .and_then(|s| s.blue_green_active_color.as_deref())
+            .or_else(|| {
+                node.metadata
+                    .annotations
+                    .as_ref()
+                    .and_then(|a| a.get("stellar.org/bg-active-color"))
+                    .map(|s| s.as_str())
+            })
+            .unwrap_or("blue");
+        selector.insert(
+            "stellar.org/deployment-color".to_string(),
+            active.to_string(),
+        );
+        selector.insert("stellar.org/bg-role".to_string(), "active".to_string());
+    }
 
     let mut annotations = BTreeMap::new();
 
@@ -1131,7 +1175,7 @@ fn build_service(node: &StellarNode, enable_mtls: bool) -> Service {
 
     merge_service_annotations(&mut annotations, node);
 
-    let http_port_name = if enable_mtls { "https" } else { "http" }.to_string();
+    let http_port_name = "http".to_string();
 
     let ports = match node.spec.node_type {
         NodeType::Validator => vec![
@@ -1175,7 +1219,7 @@ fn build_service(node: &StellarNode, enable_mtls: bool) -> Service {
             &None,
         ),
         spec: Some(ServiceSpec {
-            selector: Some(labels),
+            selector: Some(selector),
             ports: Some(ports),
             ..Default::default()
         }),
@@ -1474,7 +1518,6 @@ pub async fn delete_cnpg_resources(
 /// Ensure a Kubernetes Ingress resource exists for the node.
 /// Called from the reconciler for Horizon and SorobanRpc node types when
 /// `spec.ingress` is set.
-#[allow(dead_code)] // called via reconciler ingress path; conditional on feature flag
 pub async fn ensure_ingress(client: &Client, node: &StellarNode, dry_run: bool) -> Result<()> {
     let ingress_cfg = match &node.spec.ingress {
         Some(cfg)
@@ -1968,6 +2011,9 @@ fn build_pod_template(
                 backup_url,
                 snapshot_ref.credentials_secret_ref.as_deref(),
                 snapshot_ref.restore_image.as_deref(),
+                snapshot_ref.sha256.as_deref(),
+                snapshot_ref.expected_ledger_sequence,
+                snapshot_ref.expected_network.as_deref(),
             ));
         }
     }
@@ -2689,12 +2735,77 @@ fn build_pod_template(
         }
     }
 
+    let mut pod_object_meta = merge_resource_meta(pod_object_meta, &node.spec.resource_meta);
+    if enable_mtls {
+        pod_object_meta
+            .annotations
+            .get_or_insert_with(BTreeMap::new)
+            .insert("sidecar.istio.io/inject".to_string(), "true".to_string());
+        pod_object_meta
+            .labels
+            .get_or_insert_with(BTreeMap::new)
+            .insert("stellar.org/mtls-mode".to_string(), "strict".to_string());
+    }
+
     PodTemplateSpec {
-        metadata: Some(merge_resource_meta(
-            pod_object_meta,
-            &node.spec.resource_meta,
-        )),
+        metadata: Some(pod_object_meta),
         spec: Some(pod_spec),
+    }
+}
+
+#[cfg(test)]
+mod istio_mtls_tests {
+    use super::{build_deployment, build_service};
+    use crate::crd::{NodeType, StellarNetwork, StellarNode, StellarNodeSpec};
+    use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+    use std::collections::BTreeMap;
+
+    fn horizon_node() -> StellarNode {
+        StellarNode {
+            metadata: ObjectMeta {
+                name: Some("horizon-test".to_string()),
+                namespace: Some("stellar-system".to_string()),
+                ..Default::default()
+            },
+            spec: StellarNodeSpec {
+                node_type: NodeType::Horizon,
+                network: StellarNetwork::Testnet,
+                version: "v21.0.0".to_string(),
+                ..Default::default()
+            },
+            status: None,
+        }
+    }
+
+    #[test]
+    fn mtls_injects_istio_and_preserves_http_service_protocol() {
+        let mut node = horizon_node();
+        node.spec.resource_meta = Some(ObjectMeta {
+            annotations: Some(BTreeMap::from([(
+                "sidecar.istio.io/inject".to_string(),
+                "false".to_string(),
+            )])),
+            labels: Some(BTreeMap::from([(
+                "stellar.org/mtls-mode".to_string(),
+                "disabled".to_string(),
+            )])),
+            ..Default::default()
+        });
+        let deployment = build_deployment(&node, true);
+        let pod_template = deployment.spec.unwrap().template;
+        let metadata = pod_template.metadata.unwrap();
+        assert_eq!(
+            metadata.annotations.unwrap().get("sidecar.istio.io/inject"),
+            Some(&"true".to_string())
+        );
+        assert_eq!(
+            metadata.labels.unwrap().get("stellar.org/mtls-mode"),
+            Some(&"strict".to_string())
+        );
+
+        let service = build_service(&node, true);
+        let port = &service.spec.unwrap().ports.unwrap()[0];
+        assert_eq!(port.name.as_deref(), Some("http"));
     }
 }
 
@@ -3391,6 +3502,9 @@ fn build_snapshot_restore_container(
     backup_url: &str,
     credentials_secret_ref: Option<&str>,
     restore_image: Option<&str>,
+    expected_sha256: Option<&str>,
+    expected_ledger_sequence: Option<u64>,
+    expected_network: Option<&str>,
 ) -> Container {
     // Choose a sensible default image based on the URL scheme.
     let image = restore_image.map(|s| s.to_string()).unwrap_or_else(|| {
@@ -3413,37 +3527,65 @@ fn build_snapshot_restore_container(
     let script = if backup_url.starts_with("s3://") {
         format!(
             r#"set -e
-# Skip restore if data volume already has content (idempotent)
-if [ "$(ls -A /data 2>/dev/null)" ]; then
+# Skip restore after a previously verified import.
+if [ -f /data/.stellar-ledger-restore-complete ]; then
   echo "Data volume already populated, skipping snapshot restore."
   exit 0
 fi
-echo "Restoring from S3 snapshot: {url}"
-aws s3 cp "{url}" /tmp/snapshot.archive
+# ext4 may create lost+found on a new PVC; that alone is not existing ledger state.
+if find /data -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit | grep -q .; then
+    echo "Data volume already populated, skipping snapshot restore."
+    exit 0
+fi
+echo "Restoring from S3 snapshot: $BACKUP_URL"
+aws s3 cp "$BACKUP_URL" /tmp/snapshot.archive
+if [ -z "$EXPECTED_SHA256" ]; then
+    if aws s3 cp "$BACKUP_URL.sha256" /tmp/snapshot.archive.sha256; then
+        EXPECTED_SHA256=$(cut -d ' ' -f 1 /tmp/snapshot.archive.sha256)
+    fi
+fi
+if [ -n "$EXPECTED_SHA256" ]; then echo "$EXPECTED_SHA256  /tmp/snapshot.archive" | sha256sum -c -; else echo 'WARNING: restoring without an archive checksum'; fi
 echo "Extracting archive..."
 tar {decompress} -xf /tmp/snapshot.archive -C /data
-rm -f /tmp/snapshot.archive
-echo "Snapshot restore complete."
+if [ -f /data/files.sha256 ]; then (cd /data && sha256sum -c files.sha256); fi
+if [ -n "$EXPECTED_LEDGER_SEQUENCE" ]; then grep -Fx "ledger_sequence=$EXPECTED_LEDGER_SEQUENCE" /data/snapshot-manifest.txt; fi
+if [ -n "$EXPECTED_NETWORK" ]; then grep -Fx "network=$EXPECTED_NETWORK" /data/snapshot-manifest.txt; fi
+rm -f /data/files.sha256 /data/snapshot-manifest.txt /tmp/snapshot.archive /tmp/snapshot.archive.sha256
+touch /data/.stellar-ledger-restore-complete
+echo "Snapshot restore and verification complete."
 "#,
-            url = backup_url,
             decompress = decompress_flag,
         )
     } else {
         format!(
             r#"set -e
-# Skip restore if data volume already has content (idempotent)
-if [ "$(ls -A /data 2>/dev/null)" ]; then
+# Skip restore after a previously verified import.
+if [ -f /data/.stellar-ledger-restore-complete ]; then
   echo "Data volume already populated, skipping snapshot restore."
   exit 0
 fi
-echo "Restoring from backup: {url}"
-wget -q -O /tmp/snapshot.archive "{url}" || curl -fsSL -o /tmp/snapshot.archive "{url}"
+# ext4 may create lost+found on a new PVC; that alone is not existing ledger state.
+if find /data -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit | grep -q .; then
+    echo "Data volume already populated, skipping snapshot restore."
+    exit 0
+fi
+echo "Restoring from backup: $BACKUP_URL"
+wget -q -O /tmp/snapshot.archive "$BACKUP_URL" || curl -fsSL -o /tmp/snapshot.archive "$BACKUP_URL"
+if [ -z "$EXPECTED_SHA256" ]; then
+    if wget -q -O /tmp/snapshot.archive.sha256 "$BACKUP_URL.sha256" || curl -fsSL -o /tmp/snapshot.archive.sha256 "$BACKUP_URL.sha256"; then
+        EXPECTED_SHA256=$(cut -d ' ' -f 1 /tmp/snapshot.archive.sha256)
+    fi
+fi
+if [ -n "$EXPECTED_SHA256" ]; then echo "$EXPECTED_SHA256  /tmp/snapshot.archive" | sha256sum -c -; else echo 'WARNING: restoring without an archive checksum'; fi
 echo "Extracting archive..."
 tar {decompress} -xf /tmp/snapshot.archive -C /data
-rm -f /tmp/snapshot.archive
-echo "Snapshot restore complete."
+if [ -f /data/files.sha256 ]; then (cd /data && sha256sum -c files.sha256); fi
+if [ -n "$EXPECTED_LEDGER_SEQUENCE" ]; then grep -Fx "ledger_sequence=$EXPECTED_LEDGER_SEQUENCE" /data/snapshot-manifest.txt; fi
+if [ -n "$EXPECTED_NETWORK" ]; then grep -Fx "network=$EXPECTED_NETWORK" /data/snapshot-manifest.txt; fi
+rm -f /data/files.sha256 /data/snapshot-manifest.txt /tmp/snapshot.archive /tmp/snapshot.archive.sha256
+touch /data/.stellar-ledger-restore-complete
+echo "Snapshot restore and verification complete."
 "#,
-            url = backup_url,
             decompress = decompress_flag,
         )
     };
@@ -3452,6 +3594,18 @@ echo "Snapshot restore complete."
     let mut env: Vec<EnvVar> = vec![EnvVar {
         name: "BACKUP_URL".to_string(),
         value: Some(backup_url.to_string()),
+        ..Default::default()
+    }, EnvVar {
+        name: "EXPECTED_SHA256".to_string(),
+        value: expected_sha256.map(str::to_string),
+        ..Default::default()
+    }, EnvVar {
+        name: "EXPECTED_LEDGER_SEQUENCE".to_string(),
+        value: expected_ledger_sequence.map(|sequence| sequence.to_string()),
+        ..Default::default()
+    }, EnvVar {
+        name: "EXPECTED_NETWORK".to_string(),
+        value: expected_network.map(str::to_string),
         ..Default::default()
     }];
 
@@ -4604,50 +4758,6 @@ pub async fn delete_pdb(client: &Client, node: &StellarNode, dry_run: bool) -> R
     }
 
     Ok(())
-}
-
-// ============================================================================
-// Test helpers — thin wrappers that expose private builders for unit tests
-// (Issue #298)
-// ============================================================================
-
-#[cfg(test)]
-pub(crate) fn build_pdb_for_test(
-    node: &StellarNode,
-) -> Option<k8s_openapi::api::policy::v1::PodDisruptionBudget> {
-    build_pdb(node)
-}
-
-#[cfg(test)]
-pub(crate) fn build_pvc_for_test(
-    node: &StellarNode,
-    storage_class: String,
-) -> k8s_openapi::api::core::v1::PersistentVolumeClaim {
-    build_pvc(node, storage_class)
-}
-
-#[cfg(test)]
-pub(crate) fn build_config_map_for_test(node: &StellarNode) -> ConfigMap {
-    build_config_map(node, None, false)
-}
-
-#[cfg(test)]
-pub(crate) fn build_deployment_for_test(
-    node: &StellarNode,
-) -> k8s_openapi::api::apps::v1::Deployment {
-    build_deployment(node, false)
-}
-
-#[cfg(test)]
-pub(crate) fn build_statefulset_for_test(
-    node: &StellarNode,
-) -> k8s_openapi::api::apps::v1::StatefulSet {
-    build_statefulset(node, false, None)
-}
-
-#[cfg(test)]
-pub(crate) fn build_service_for_test(node: &StellarNode) -> k8s_openapi::api::core::v1::Service {
-    build_service(node, false)
 }
 
 #[cfg(test)]
