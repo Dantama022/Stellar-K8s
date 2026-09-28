@@ -101,6 +101,7 @@ pub mod captive_core;
 pub mod chaos_engineering;
 pub mod compliance_export;
 pub mod conditions;
+pub mod config_scope;
 pub mod cost;
 pub mod cross_cluster;
 pub mod cross_region_sync;
