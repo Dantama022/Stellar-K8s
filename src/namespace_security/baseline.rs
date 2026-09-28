@@ -1,5 +1,4 @@
 // Copyright 2024 Stellar-K8s Contributors
-use std::collections::BTreeMap;
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -13,6 +12,7 @@ use std::collections::BTreeMap;
 // limitations under the License.
 //! Security baseline definitions
 
+use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use schemars::JsonSchema;

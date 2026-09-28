@@ -57,7 +57,7 @@ schemars = { version = "0.8", features = ["chrono"] }
 
 # Error handling
 thiserror = "1"
-anyhow = "1.0.103" # Pinned to Cargo.lock; 1.0.108 was unpublished
+anyhow = "1.0.104" # Pinned to Cargo.lock (1.0.104); 1.0.108 was unpublished
 # CLI argument parsing
 clap = { version = "4.5", features = ["derive", "env"] }
 clap_complete = "4.6"
