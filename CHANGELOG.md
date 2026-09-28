@@ -3,6 +3,99 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## Chart v2.11.0 (2026-09-28) [minor]
+
+• Merge pull request #1597 from susanyusuf/fix/1560-1561-config-scoping-and-peer-connectivity
+• fix(config)+feat(peer): keep operator cfg keys at document root (#1560) and surface validator peer reachability (#1561)
+• Merge pull request #1595 from NanaKhadija1980j/fix/1518-deterministic-build-reproducibility-verification-for-all-artifacts
+• [1518] [EPIC] Deterministic Build Reproducibility Verification for All Artifacts
+• Merge branch 'main' into fix/1518-deterministic-build-reproducibility-verification-for-all-artifacts
+✨ feat(peer): surface validator peer reachability as a status condition
+• A validator that cannot reach its peers produces no signal at all:
+• stellar-core logs a failed overlay connection, the pod stays Ready, and the
+• node is quietly absent from quorum. Blocked ports, wrong ports, DNS failures
+• and a stale KNOWN_PEERS list all look identical from the outside, which is
+• what makes them expensive to diagnose.
+• Add controller::peer_connectivity, which TCP-dials each configured peer and
+• reports the address, port, outcome and last attempt time per peer. Probes
+• run at most MAX_CONCURRENT_PROBES at a time with a bounded timeout, so one
+• blocked host cannot delay the rest, and results are returned in
+• configuration order so the condition message is stable across rounds. The
+• default 30s interval keeps two rounds inside the 60s detection budget the
+• issue asks for.
+• Wire it in on both sides the issue calls for:
+• - Reconciler: update_status now folds the result into a PeerConnectivity
+•   condition, using the existing conditions::set_condition so
+•   last_transition_time is only bumped on a real transition. The condition is
+•   removed rather than left stale for non-validators, suspended nodes and
+•   validators with no peers.
+• - Health sidecar: reads KNOWN_PEERS, runs its own probe loop and exposes
+•   /peers. Readiness now fails when every configured peer is unreachable,
+•   because a synced validator with no reachable peer cannot complete SCP.
+•   Absence of probe data is not treated as failure, so sidecars that have not
+•   completed a round, and nodes with no peers, are unaffected.
+• Both derive their peer list from known_peers_for_node, and the operator
+• renders that same list into the sidecar's KNOWN_PEERS env var, so the
+• pod-local probe and the status condition cannot disagree about which peers
+• are in play.
+• remediation_hint names the port, the protocol and the likely cause: a
+• security-group or NetworkPolicy rule blocking the overlay port, a peer
+• listed on 11626 (the HTTP/admin port) instead of 11625, or a stale entry to
+• refresh. Automatic remediation is deliberately not implemented - silently
+• rewriting a user's peer list or port is a worse failure than a clear
+• diagnostic, and the hint already states the exact change required.
+• Closes #1561
+🐛 fix(config): keep operator-managed stellar-core.cfg keys at the document root
+• In TOML every key written after a table header belongs to that table. The
+• operator appended CATCHUP_COMPLETE, CATCHUP_RECENT, HTTP_PORT_SECURE,
+• TLS_CERT_FILE and TLS_KEY_FILE to the *end* of the user-supplied
+• validatorConfig, so as soon as a user set [QUORUM_SET], [[VALIDATORS]] or
+• [[HOME_DOMAINS]] every one of those keys was silently captured by the last
+• table. The file still parsed and stellar-core still started, but with mTLS
+• off, the wrong catch-up mode and no KNOWN_PEERS, and nothing reported the
+• loss.
+• Add controller::config_scope, which:
+• - renders the operator keys through OperatorHeader and emits them *before*
+•   user content, so they always land at the root;
+• - re-parses the assembled document and reports any operator key that ended
+•   up table-scoped (misplaced_operator_keys) plus any user key written after
+•   a table header that stellar-core would read at the root
+•   (orphaned_root_keys). Both are logged as warnings that name the node,
+•   the key and the table that captured it. Restricting the orphan check to
+•   keys stellar-core actually reads at the root keeps it actionable instead
+•   of flagging legitimate table members such as THRESHOLD_PERCENT or TOML;
+• - tolerates unparsable config by reporting it rather than failing a
+•   reconcile.
+• Cover the output with byte-exact golden files under
+• tests/fixtures/stellar_core_cfg covering full history, recent history with
+• mTLS, and an operator header with no user section, plus a structural
+• assertion that every operator key present in the generated document is
+• genuinely at the root.
+• Closes #1560
+🐛 fix(crd): remove duplicate service_ownership module and LedgerCloseWebhookSpec
+• The crate did not compile on main: src/crd/mod.rs declared
+• pub mod service_ownership; twice, and src/crd/ledger_close_webhook.rs
+• carried a second empty LedgerCloseWebhookSpec unit struct whose
+• CustomResource derive generated a resource type that shadowed the real
+• spec struct.
+• Move the CustomResource derive onto the actual LedgerCloseWebhookSpec• so the generated resource is built from the real schema, and drop the
+• duplicate module declaration. Both are required before any other change
+• can be validated by CI.
+✨ feat(build): deterministic build reproducibility verification (#1518)
+• Turns "rebuilds are reproducible" into a checkable property.
+• - Independent rebuild pipeline: Pipeline/assert_independent() rejects a
+•   verifier that reuses the release pipeline or builds a different revision.
+• - Bit-for-bit comparison by SHA-256 plus a byte-level first-difference
+•   offset, not by version or timestamp.
+• - Mismatch localization: every mismatch is attributed to the build step that
+•   emits the artifact, with the non-determinism sources detected in the
+•   rebuilt bytes and the determinism flags that step fails to pin.
+• - Per-release status and badge against REQUIRED_REPRODUCIBLE_RATE (95%).
+• Non-determinism detection covers timestamps, leaked build paths, locale,
+• VCS metadata, build ids, archive mtimes, mixed line endings and embedded
+• random seeds, so a mismatch is attributed to a concrete cause.
+
+
 ## Chart v2.10.1 (2026-09-28) [patch]
 
 • Merge pull request #1548 from itsnotOJ/fix/cleanup-935-936-934
